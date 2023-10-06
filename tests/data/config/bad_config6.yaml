@@ -1,0 +1,10 @@
+device_type: T4
+connection_type: USB
+identifier: test.foo.bar
+topics:
+  - topic_name: ledControllerItem
+    sensor_name: labjack_test_1
+    led_names: [M375L4, M445L4, M505L4, M565L4]
+    channel_names: [DIO1, FIO0, CIO3, EIO3]
+    location: somewhere, nowhere, somewhere else, guess
+    bogus_item: acbd
