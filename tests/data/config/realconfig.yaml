@@ -1,0 +1,9 @@
+device_type: T4
+connection_type: TCP
+identifier: ledprojectorlj.tu.lsst.org
+topics:
+  - topic_name: ledControllerItem
+    sensor_name: tucson_lab_ljm
+    led_names: [M383L3, M970L4, M455L4, M505L4, M565L3, M660L4, M730L5, M780LP1, M850L3, M940L3]
+    channel_names: [EIO0, EIO1, EIO2, EIO3, EIO4, EIO5, EIO6, EIO7, CIO0, CIO1]
+    location: tucson
