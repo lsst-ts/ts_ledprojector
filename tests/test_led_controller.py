@@ -28,6 +28,7 @@ from collections.abc import AsyncGenerator
 from typing import TypeAlias
 
 import yaml
+from jsonschema.exceptions import ValidationError
 from lsst.ts import ledprojector, salobj
 from lsst.ts.ess import common, labjack
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
@@ -44,6 +45,7 @@ TIMEOUT = 5
 
 class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
+        self.callbackStatus = False
         self.log = logging.getLogger()
         self.data_dir = pathlib.Path(__file__).parent / "data" / "config"
 
@@ -62,6 +64,12 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
         for item in listToTest:
             if item not in validList:
                 assert False
+
+    def dummy_bad_callback(self) -> None:
+        pass
+
+    async def dummy_good_callback(self) -> None:
+        self.callbackStatus = True
 
     async def test_constructor_good_full(self) -> None:
         """Construct with good_full.yaml and compare values to that file.
@@ -95,6 +103,17 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
             listToTest=topic["led_names"],
         )
 
+    async def test_bad_callback(self) -> None:
+        config = self.get_config("config.yaml")
+        # test that callback has async
+        with self.assertRaises(TypeError):
+            ledprojector.LEDController(
+                config=config,
+                log=self.log,
+                simulate=True,
+                status_callback=self.dummy_bad_callback,
+            )
+
     async def test_registry(self) -> None:
         data_client_class = common.get_data_client_class("LabJackDataClient")
         assert data_client_class is labjack.LabJackDataClient
@@ -105,11 +124,12 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
             config=config,
             log=self.log,
             simulate=True,
+            status_callback=self.dummy_good_callback,
         )
 
         # status should be unknown on creation
         for channel in set(led_client.channels.values()):
-            assert channel.status == LEDBasicState.UNKNOWN
+            assert channel.status is LEDBasicState.UNKNOWN
 
         # make sure it asserts if we give it invalid identifier
         with self.assertRaises(RuntimeError):
@@ -118,13 +138,20 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
             led_client.get_state(len(config.topics[0]["channel_names"] + 1))
 
         # accept proper values and go by multiple identifiers
+        self.callbackStatus = False
         await led_client.set_state("DIO1", LEDBasicState.ON)
-        assert led_client.get_state("DIO1") == LEDBasicState.ON
-        assert led_client.get_state("M375L4") == LEDBasicState.ON
-        assert led_client.get_state(0) == LEDBasicState.ON
+        assert led_client.get_state("DIO1") is LEDBasicState.ON
+        assert led_client.get_state("M375L4") is LEDBasicState.ON
+        assert led_client.get_state(0) is LEDBasicState.ON
+        assert self.callbackStatus is True
+
+        # test switching to same state, callback shouldn't be called
+        self.callbackStatus = False
+        await led_client.set_state("DIO1", LEDBasicState.ON)
+        assert self.callbackStatus is False
 
         await led_client.set_state("M375L4", LEDBasicState.OFF)
-        assert led_client.get_state("DIO1") == LEDBasicState.OFF
+        assert led_client.get_state("DIO1") is LEDBasicState.OFF
 
     async def test_connecting(self) -> None:
         config = self.get_config("config.yaml")
@@ -134,6 +161,7 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
             simulate=True,
         )
 
+        # TODO ljm errors?
         # test connection and disconnection
         # TODO: am I able to test when there are a mismatch of sensors given
         # vs whats already on the labjack? as asserted by RuntimeError
@@ -146,34 +174,93 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
             config=config,
             log=self.log,
             simulate=True,
+            status_callback=self.dummy_good_callback,
         )
 
         # status should be unknown on creation
         for channel in set(led_client.channels.values()):
-            assert channel.status == LEDBasicState.UNKNOWN
+            assert channel.status is LEDBasicState.UNKNOWN
 
-        await led_client.switch_led("M375L4", LEDBasicState.ON)
-        assert led_client.get_state("DIO1") == LEDBasicState.ON
-        assert led_client.get_state("M375L4") == LEDBasicState.ON
-        assert led_client.get_state(0) == LEDBasicState.ON
+        # confirm that we cannot switch led to state that isn't on/off
+        for state in LEDBasicState:
+            if state not in [LEDBasicState.ON, LEDBasicState.OFF]:
+                with self.assertRaises(TypeError):
+                    await led_client.switch_led("M375L4", state)
 
         # accept proper values and go by multiple identifiers
-        await led_client.switch_led("CIO3", LEDBasicState.OFF)
-        assert led_client.get_state("CIO3") == LEDBasicState.OFF
-        assert led_client.get_state("M505L4") == LEDBasicState.OFF
-        assert led_client.get_state(2) == LEDBasicState.OFF
+        self.callbackStatus = False
+        await led_client.switch_led("M375L4", LEDBasicState.ON)
+        assert led_client.get_state("DIO1") is LEDBasicState.ON
+        assert led_client.get_state("M375L4") is LEDBasicState.ON
+        assert led_client.get_state(0) is LEDBasicState.ON
+        assert self.callbackStatus is True
 
+        self.callbackStatus = False
+        await led_client.switch_led("CIO3", LEDBasicState.OFF)
+        assert led_client.get_state("CIO3") is LEDBasicState.OFF
+        assert led_client.get_state("M505L4") is LEDBasicState.OFF
+        assert led_client.get_state(2) is LEDBasicState.OFF
+        assert self.callbackStatus is True
+
+        # test same state
+        self.callbackStatus = False
+        await led_client.switch_led("CIO3", LEDBasicState.OFF)
+        assert self.callbackStatus is False
+
+    async def test_multiple_led_switching(self) -> None:
+        config = self.get_config("config.yaml")
+        led_client = ledprojector.LEDController(
+            config=config,
+            log=self.log,
+            simulate=True,
+            status_callback=self.dummy_good_callback,
+        )
+        # test multiples
+        self.callbackStatus = False
         await led_client.switch_multiple_leds(
             ["M375L4", "EIO3", "M505L4", 1], [LEDBasicState.ON for i in range(4)]
         )
+        assert self.callbackStatus is True
 
+        # test double setting some
+        self.callbackStatus = False
+        await led_client.switch_multiple_leds(
+            ["M375L4", "EIO3"], [LEDBasicState.ON for i in range(2)]
+        )
+        assert self.callbackStatus is False
+
+        # confirm the states
         topic = config.topics[0]
         for channel in topic["led_names"]:
-            assert led_client.get_state(channel) == LEDBasicState.ON
+            assert led_client.get_state(channel) is LEDBasicState.ON
         for channel in topic["channel_names"]:
-            assert led_client.get_state(channel) == LEDBasicState.ON
+            assert led_client.get_state(channel) is LEDBasicState.ON
         for i in range(4):
-            assert led_client.get_state(i) == LEDBasicState.ON
+            assert led_client.get_state(i) is LEDBasicState.ON
+
+        # test length of identifier/state mismatch
+        with self.assertRaises(RuntimeError):
+            await led_client.switch_multiple_leds(
+                ["M375L4", "EIO3"], [LEDBasicState.ON for i in range(3)]
+            )
+
+        # test invalid states on multiple led switch
+        for state in LEDBasicState:
+            if state not in [LEDBasicState.ON, LEDBasicState.OFF]:
+                with self.assertRaises(TypeError):
+                    await led_client.switch_multiple_leds(
+                        ["M375L4", "EIO3"], [state for i in range(2)]
+                    )
+
+    async def test_bad_configs(self) -> None:
+        # test various bad yamls, missing required values
+        for i in range(8):
+            with self.assertRaises(ValidationError):
+                self.get_config(f"bad_config{i}.yaml")
+
+    async def test_minimal(self) -> None:
+        # test minimal yaml (missing values where default is set)
+        self.get_config("good_minimal.yaml")
 
     def get_config(self, filename: PathT) -> types.SimpleNamespace:
         """Get a config dict from tests/data.

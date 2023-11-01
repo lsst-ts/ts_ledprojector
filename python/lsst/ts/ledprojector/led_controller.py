@@ -60,12 +60,12 @@ MAX_MOCK_READ_FREQUENCY = 10000
 class LabjackChannel:
     def __init__(
         self,
-        serialNumber: str,
+        serial_number: str,
         channel: str,
         index: int = -1,
         status: LEDBasicState = LEDBasicState.UNKNOWN,
     ):
-        self.serial = serialNumber
+        self.serial = serial_number
         self.channel = channel
         self.index = index
         self.status = status
@@ -93,6 +93,10 @@ class LabjackChannel:
             addNum += self.offset_dict[self.channel[:3]]
         return addNum
 
+    def value(self, stateToWrite: LEDBasicState) -> ljm.constants.UINT16:
+        # Wrapper to convert ON/OFF to the actual value to write
+        return 0 if stateToWrite == LEDBasicState.ON else 1
+
 
 class LEDController(BaseLabJackDataClient):
     """Class to handle switching of LEDs connected to Labjack Interface
@@ -101,15 +105,9 @@ class LEDController(BaseLabJackDataClient):
     ----------
     config : `types.SimpleNamespace`
         LED-specific configuration.
-    log : `logging.Logger`
+    log : `logging.Logger` or 'None', optional
         Logger.
-    labjack : 'LabJackInterface'
-        The defined interface class to the labjack that LEDs are connected to.
-    labjack_port : 'string'
-        The string name of the Labjack port that this LED is connected to.
-    led_name : 'string'
-        String of the serial number for this LED model.
-    status_callback : `awaitable` or `None`, optional
+    status_callback : `Callable` or `None`, optional
         Coroutine to call when evt_ledState or evt_ledConnected changes.
         It receives one argument: this model.
     simulate : `bool`, optional
@@ -123,15 +121,6 @@ class LEDController(BaseLabJackDataClient):
     ------
     TypeError
         If ``status_callback`` is not None and not a coroutine.
-    ValueError
-        If ``config.default_power`` not in range [800, 1200], inclusive.
-
-    Attributes
-    ----------
-    default_power : `float`
-        Default power after the led is started (Watts) in range 800-1200.
-    led_was_on : `bool`
-        Was the led commanded on, as of the most recently read LabJack data?
     """
 
     def __init__(
@@ -162,33 +151,40 @@ class LEDController(BaseLabJackDataClient):
         self.make_connect_time_out = make_connect_time_out
         self.status_callback = status_callback
 
-        # TODO: better names
         # We want a multiple key -> 1 value list for easy parsing
         # We are creating a dictionary with 3 keys -> 1 value
         # 1st key : Serial number of the LED
         # 2nd key : 0-indexed list placement of the LED
         # 3rd key : Labjack Channel Name of that LED
-        # First, make a list of tuples for the relevant info from the config
-        for topic in self.config.topics:
-            if topic["topic_name"] == "ledControllerItem":
-                led_topic = topic
+        # First extract info from the config file,
+        # note that were going to use the first
+        # available 'ledControllerItem' in config,
+        # as there should only be one anyway
+        led_topic = next(
+            topic
+            for topic in self.config.topics
+            if topic["topic_name"] == "ledControllerItem"
+        )
+
+        # Extract the serial and lbj channel name lists
         led_names = led_topic["led_names"]
         channel_names = led_topic["channel_names"]
 
         self.log.info(f"Opening led_controller with led names {led_names}")
         self.log.info(f"Opening led_controller with channel names {channel_names}")
 
-        tmp = list(zip(led_names, channel_names))
+        # combine the two lists into a list of tuples
+        partial_key_tuple = list(zip(led_names, channel_names))
+
         # Now make a list of labjackchannel objs using the previous list's info
         # Note that we use enumerate to get the numerical index
-        a = [
-            LabjackChannel(serialNumber=data[0], channel=data[1], index=ind)
-            for ind, data in enumerate(tmp, start=0)
+        full_key_tuple = [
+            LabjackChannel(serial_number=data[0], channel=data[1], index=ind)
+            for ind, data in enumerate(partial_key_tuple, start=0)
         ]
         # Now create our multi-key dictionary
-        # TODO: write unit test for this dictionary setup
         self.channels: Dict[Union[str, int], LabjackChannel] = {}
-        for lbc in a:
+        for lbc in full_key_tuple:
             self.channels.update({lbc.serial: lbc})
             self.channels.update({lbc.index: lbc})
             self.channels.update({lbc.channel: lbc})
@@ -223,10 +219,6 @@ properties:
         * A serial number if connection_type = USB
         * For testing in an environment with only one LabJack you may use ANY
     type: string
-  poll_interval:
-    description: Polling interval (seconds)
-    type: number
-    default: 1
   topics:
     description: >-
       Array of batches of relevant sensors.
@@ -266,28 +258,24 @@ properties:
         - location
         - led_names
         - channel_names
+      additionalProperties: false
 required:
   - device_type
   - connection_type
   - identifier
-  - poll_interval
+  - topics
 additionalProperties: false
 """
         )
 
     async def run(self) -> None:
-        """Read data from the LabJack."""
-        while True:
-            # TODO: properly handle return
-            # TODO: write unit test on that return handling
-            # data_dict =
-            await self.run_in_thread(
-                func=self._blocking_read, timeout=COMMUNICATION_TIMEOUT
-            )
-
-            # Support unit testing with a future the test can reset.
-            self.wrote_event.set()
-            await asyncio.sleep(self.config.poll_interval)
+        """
+        There is no use in constantly reading labjack status, so leave empty.
+        common.BaseDataClient requires that we define it:
+            TypeError: Can't instantiate abstract class
+                        LEDController with abstract method run
+        """
+        pass
 
     def get_state(
         self,
@@ -312,7 +300,6 @@ additionalProperties: false
         RuntimeError
             If identifier is not valid
         """
-        # TODO: maybe change this to try/except or osmething else?
         if identifier in self.channels:
             return self.channels[identifier].status
         else:
@@ -323,7 +310,7 @@ additionalProperties: false
 
         Parameters
         ----------
-        identifier : `str` | `integer`
+        identifier : `str` | `int`
             Serial number of LED or 0-indexed identifier
         status : `LEDBasicState`
             Status to set the LED to.
@@ -333,18 +320,20 @@ additionalProperties: false
         RuntimeError
             If identifier is not valid
         """
-        # TODO: maybe change this to try/except or osmething else?
         if identifier in self.channels:
             if self.channels[identifier].status is not status:
                 self.channels[identifier].status = status
+                self.log.info(f"LED {identifier} -> {status}")
                 await self.call_status_callback()
+            else:
+                self.log.warning(f"LED {identifier} is already {status}")
         else:
             raise RuntimeError("Given identifier doesn't exist")
 
     async def switch_led(
         self,
         identifier: str | int,
-        ledSetting: LEDBasicState,
+        led_state: LEDBasicState,
     ) -> None:
         """Switch the LED on/off.
 
@@ -353,53 +342,76 @@ additionalProperties: false
         identifier : `str` | `int`
             The serial number of the LED, port of the labjack,
             or a 0-indexed identifier
-        ledSetting : `boolean`
-            true to switch LED on, false to switch LED
+        led_state : `LEDBasicState`
+            ON to switch LED on, OFF to switch LED off
 
         Raises
         ------
         RuntimeError
             If the Labjack cannot connect
+            If the Labjack reports back an error
+        TypeError
+            If led_state is not ON or OFF
         """
-        # TODO: Do we need separate on/off functions?
+        # Check that led_state is valid
+        if led_state not in [LEDBasicState.ON, LEDBasicState.OFF]:
+            raise TypeError("Invalid led_state to switch LED to")
 
         # Check we are not already in that state.
-        if self.get_state(identifier) == ledSetting:
-            self.log.warning(f"LED {identifier} is already {ledSetting}")
+        if self.get_state(identifier) == led_state:
+            self.log.warning(f"LED {identifier} is already {led_state}")
             return
 
-        # TODO: Maybe we just raise error if handle isn't explicitly connected?
         if self.handle is None:
             try:
-                self.log.info("Attempting to connect to Labjack...")
+                self.log.warning(
+                    "Labjack not explicitly connected when calling switch_led,"
+                    " attempting to connect now..."
+                )
                 self._blocking_connect()
             except RuntimeError:
-                raise RuntimeError("Labjack can't connect")
+                raise RuntimeError("Labjack unable to connect")
 
         # switch the LED.
-        # TODO: do we need to check return here?
-        self.log.info(f"Switching LED {identifier} to {ledSetting}")
-        ljm.eWriteAddress(
-            self.handle,
-            self.channels[identifier].address(),
-            ljm.constants.INT32,
-            int(ledSetting),
-        )
+        address = self.channels[identifier].address()
+        value = self.channels[identifier].value(led_state)
 
+        try:
+            ljm.eWriteAddress(self.handle, address, ljm.constants.UINT16, value)
+        except ljm.LJMError as ljm_error:
+            # Set up log string
+            error_code = int(ljm_error.errorCode())
+            error_string = str(ljm_error)
+            log_string = str(
+                f"Labjack reported error#{error_code} during eWriteAddress"
+                f"in switch_led, dumping values: "
+                f"identifier: {identifier} led_state: {led_state} "
+                f"handle: {self.handle} address: {address} "
+                f"data_type: {ljm.constants.UINT16} value_written: {value} "
+                f"ljm_error_string: {error_string}"
+            )
+
+            # If error then raise except else its a warning so continue
+            if error_code > ljm.WARNINGS_END:
+                self.log.exception(log_string)
+                raise RuntimeError(f"ljm reported error, see log: {log_string}")
+            self.log.warning(log_string)
+
+        # None of the warnings are egregious, so the state should have changed
         # Update state
-        await self.set_state(identifier, ledSetting)
+        await self.set_state(identifier, led_state)
 
     async def switch_multiple_leds(
-        self, identifiers: List[Union[str, int]], ledStates: List[LEDBasicState]
+        self, identifiers: List[Union[str, int]], led_states: List[LEDBasicState]
     ) -> None:
         """Switch multiple LEDs at once.
 
         Parameters
         ----------
-        identifiers : `string` | `int`
+        identifiers : `list of str or int`
             A list of serial numbers and/or 0-indexed identifiers
             of the LEDs to switch
-        ledStates : `boolean`
+        led_states : `list of LEDBasicState`
             A list of boolean states for the LEDs to be switched,
             true for on, false for off
 
@@ -407,27 +419,20 @@ additionalProperties: false
         ------
         RuntimeError
             If the Labjack cannot connect
-            If the len of identifiers & ledStates is not equal.
+            If the len of identifiers & led_states is not equal.
+            If the Labjack reports back an error
+        TypeError
+            If led_states includes an item that is not ON or OFF
         """
-        if len(identifiers) != len(ledStates):
+        if len(identifiers) != len(led_states):
             raise RuntimeError(
                 "Length of identifiers and states in switch_multiple_leds doesn't match."
             )
 
-        # Get rid of LEDs that are already set
-        # TODO: probably more efficient to just get rid of this
-        # TODO: and send it anyway
-        for count, identifier in enumerate(identifiers, start=0):
-            if self.get_state(identifier) == ledStates[count]:
-                self.log.warning(f"LED {identifier} is already {ledStates[count]}")
-                # Note that even though we might be
-                # deleting an element of the list
-                # The count will update as well so we
-                # will not go out of bounds
-                del identifiers[count]
-                del ledStates[count]
+        for state in led_states:
+            if state not in [LEDBasicState.ON, LEDBasicState.OFF]:
+                raise TypeError(f"{state} is an invalid state to set the LED to")
 
-        # TODO: Maybe we just raise error if handle isn't explicitly connected?
         if self.handle is None:
             try:
                 self.log.info("Attempting to connect to Labjack...")
@@ -435,20 +440,43 @@ additionalProperties: false
             except RuntimeError:
                 raise RuntimeError("Labjack can't connect")
 
-        # Turn on the LED.
-        # TODO: probably should check the ewrite return val
-        self.log.info(f"Switching LEDs {identifiers} to {ledStates}")
-        ljm.eWriteAddresses(
-            self.handle,
-            len(identifiers),
-            [self.channels[identifier].address() for identifier in identifiers],
-            [ljm.constants.INT32 for x in ledStates],
-            [(int(x)) for x in ledStates],
-        )
+        self.log.info(f"Switching LEDs {identifiers} to {led_states}")
+
+        addresses = [self.channels[identifier].address() for identifier in identifiers]
+        values = [
+            (self.channels[identifier].value(state))
+            for state, identifier in zip(led_states, identifiers)
+        ]
+        try:
+            ljm.eWriteAddresses(
+                self.handle,
+                len(identifiers),
+                addresses,
+                [ljm.constants.UINT16 for _ in led_states],
+                values,
+            )
+        except ljm.LJMError as ljm_error:
+            # Set up log string
+            error_code = int(ljm_error.errorCode())
+            error_string = str(ljm_error)
+            log_string = str(
+                f"Labjack reported error#{error_code} during eWriteAddress"
+                f"in switch_led, dumping values: "
+                f"identifiers: {identifiers} led_states: {led_states} "
+                f"handle: {self.handle} addresses: {addresses} "
+                f"data_type: {ljm.constants.UINT16} values_written: {values} "
+                f"ljm_error_string: {error_string}"
+            )
+
+            # If error then raise except else its a warning so continue
+            if error_code > ljm.WARNINGS_END:
+                self.log.exception(log_string)
+                raise RuntimeError(f"ljm reported error, see log: {log_string}")
+            self.log.warning(log_string)
 
         # Update state
         for count, identifier in enumerate(identifiers, start=0):
-            await self.set_state(identifier, ledStates[count])
+            await self.set_state(identifier, led_states[count])
 
     async def call_status_callback(self) -> None:
         """
@@ -474,14 +502,13 @@ additionalProperties: false
             does not return a value from the labjack, i.e. configuration
             is not valid.
         """
+        self.log.info("Attempting to connect to Labjack...")
         super()._blocking_connect()
 
         # Configure flexible IO to digital
         # The DIO_INHIBIT hex is what qualifies something as being digital.
         # 0 bit = digital. Read from LSB, ex: FIO0 is bit 0
-        # TODO: do we need to have a smart parsing function
-        # TODO: to parse flexible IO, or can we just hardcode?
-        # TODO: if hardcoding, does hardcoding all as 0 (digital) work?
+        self.log.info("Setting all IO as DIO...")
         ljm.eWriteName(self.handle, "DIO_INHIBIT", 0x00000)
         ljm.eWriteName(self.handle, "DIO_ANALOG_ENABLE", 0x00000)
 

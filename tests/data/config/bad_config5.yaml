@@ -1,6 +1,7 @@
 device_type: T4
 connection_type: USB
 identifier: test.foo.bar
+bogusitem: abcd
 topics:
   - topic_name: ledControllerItem
     sensor_name: labjack_test_1

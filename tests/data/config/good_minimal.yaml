@@ -1,5 +1,3 @@
-device_type: T4
-connection_type: USB
 identifier: test.foo.bar
 topics:
   - topic_name: ledControllerItem
