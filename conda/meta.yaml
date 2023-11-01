@@ -7,7 +7,7 @@ source:
   path: ../
 
 build:
-  noarch: generic
+  noarch: python
   script: {{ PYTHON }} -m pip install --no-deps --ignore-installed .
 
 test:
@@ -17,6 +17,8 @@ test:
     - ts-utils
     - ts-salobj {{ salobj_version }}
     - labjack-ljm
+    - ts-ess-common
+    - ts-ess-labjack
   source_files:
     - pyproject.toml
     - python
@@ -41,3 +43,4 @@ requirements:
     - ts-salobj
     - ts-utils
     - ts-ess-common
+    - ts-ess-labjack
