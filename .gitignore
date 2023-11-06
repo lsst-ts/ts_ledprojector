@@ -8,6 +8,9 @@ config.log
 *.pyc
 *_wrap.cc
 *Lib.py
+*egg
+*egg-info
+ospl-info.log
 
 # Built by sconsUtils
 version.py
@@ -19,3 +22,16 @@ pytest_session.txt
 .cache/
 .pytest_cache
 .coverage
+.pre-commit-config.yaml
+.clang-format
+.flake8
+.isort.cfg
+.mypy.ini
+.ruff.toml
+towncrier.toml
+
+# Jupyter Notebook
+*.ipynb
+
+# VsCode
+*.vscode
