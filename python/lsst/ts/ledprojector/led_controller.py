@@ -132,10 +132,6 @@ class LEDController(BaseLabJackDataClient):
         Logger.
     simulate : `bool`, optional
         Run in simulation mode?
-    make_connect_time_out : `bool`, optional
-        Make the connect method timeout?
-        Only useful for unit tests.
-        Ignored if simulate false.
     """
 
     def __init__(
@@ -143,7 +139,6 @@ class LEDController(BaseLabJackDataClient):
         config: types.SimpleNamespace,
         log: logging.Logger | None = None,
         simulate: bool = False,
-        make_connect_time_out: bool = False,
     ) -> None:
         super().__init__(
             config=config, topics=config.topics, log=log, simulation_mode=simulate
@@ -155,7 +150,6 @@ class LEDController(BaseLabJackDataClient):
             if log is not None
             else logging.getLogger(type(self).__name__)
         )
-        self.make_connect_time_out = make_connect_time_out
 
         # We want a multiple key -> 1 value list for easy parsing
         # We are creating a dictionary with 3 keys -> 1 value
@@ -349,12 +343,18 @@ additionalProperties: false
 
         Parameters
         ----------
-        func : `Callable`
-            The blocking function to run;
-            The function must take no arguments.
-            For example: ``self._blocking_connect``.
-        timeout : `float`
-            Time limit (seconds).
+        identifier : `str` | `int`
+            The serial number of the LED, port of the labjack,
+            or a 0-indexed identifier
+        led_state : `LEDBasicState`
+            ON to switch LED on, OFF to switch LED off
+
+        Raises
+        ------
+        TypeError
+            If the led_state given is invalid
+        Exception
+            If the blocking switch LED failed
         """
         loop = asyncio.get_running_loop()
         try:
@@ -454,6 +454,20 @@ additionalProperties: false
         # Update state
         self._set_state(identifier, led_state)
 
+    async def switch_all_leds_off(self) -> None:
+        """Switch ALL LEDs off"""
+        await self.switch_multiple_leds(
+            [led for led in self.channels],
+            [LEDBasicState.OFF for _ in range(len(self.channels))],
+        )
+
+    async def switch_all_leds_on(self) -> None:
+        """Switch ALL LEDs on"""
+        await self.switch_multiple_leds(
+            [led for led in self.channels],
+            [LEDBasicState.ON for _ in range(len(self.channels))],
+        )
+
     async def switch_multiple_leds(
         self, identifiers: List[Union[str, int]], led_states: List[LEDBasicState]
     ) -> None:
@@ -464,12 +478,17 @@ additionalProperties: false
 
         Parameters
         ----------
-        func : `Callable`
-            The blocking function to run;
-            The function must take no arguments.
-            For example: ``self._blocking_connect``.
-        timeout : `float`
-            Time limit (seconds).
+        identifiers : `list of str or int`
+            A list of serial numbers and/or 0-indexed identifiers
+            of the LEDs to switch
+        led_states : `list of LEDBasicState`
+            A list of boolean states for the LEDs to be switched,
+            true for on, false for off
+
+        Raises
+        ------
+        Exception
+            If the blocking switch multiple LEDs failed
         """
         loop = asyncio.get_running_loop()
         try:
