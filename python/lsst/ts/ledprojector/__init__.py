@@ -25,3 +25,4 @@ except ModuleNotFoundError:
     __version__ = "?"
 
 from .led_controller import *
+from .ledprojector_csc import *

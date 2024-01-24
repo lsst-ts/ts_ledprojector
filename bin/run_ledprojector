@@ -1,0 +1,5 @@
+#!/usr/bin/env python
+
+from lsst.ts.ledprojector import run_ledprojector
+
+run_ledprojector()

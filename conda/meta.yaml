@@ -9,6 +9,8 @@ source:
 build:
   noarch: python
   script: {{ PYTHON }} -m pip install --no-deps --ignore-installed .
+  entry_points:
+    - run_ledprojector = lsst.ts.ledprojector:run_ledprojector
 
 test:
   requires:

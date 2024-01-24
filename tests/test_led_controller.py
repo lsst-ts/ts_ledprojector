@@ -23,6 +23,7 @@ import asyncio
 import contextlib
 import logging
 import pathlib
+import random
 import types
 import unittest
 from collections.abc import AsyncGenerator
@@ -98,7 +99,9 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_registry(self) -> None:
-        data_client_class = common.get_data_client_class("LabJackDataClient")
+        data_client_class = common.data_client.get_data_client_class(
+            "LabJackDataClient"
+        )
         assert data_client_class is labjack.LabJackDataClient
 
     async def test_state_change(self) -> None:
@@ -213,6 +216,48 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
                         ),
                         timeout=5,
                     )
+
+    async def test_switch_all_off(self) -> None:
+        config = self.get_config("config.yaml")
+        led_client = ledprojector.LEDController(
+            config=config,
+            log=self.log,
+            simulate=True,
+        )
+        topic = config.topics[0]
+        for channel in topic["led_names"]:
+            await asyncio.wait_for(
+                led_client.switch_multiple_leds(
+                    [channel],
+                    [LEDBasicState.ON if random.randrange(2) else LEDBasicState.OFF],
+                ),
+                timeout=5,
+            )
+        await led_client.switch_all_leds_off()
+
+        for channel in set(led_client.channels.values()):
+            assert channel.status is LEDBasicState.OFF
+
+    async def test_switch_all_on(self) -> None:
+        config = self.get_config("config.yaml")
+        led_client = ledprojector.LEDController(
+            config=config,
+            log=self.log,
+            simulate=True,
+        )
+        topic = config.topics[0]
+        for channel in topic["led_names"]:
+            await asyncio.wait_for(
+                led_client.switch_multiple_leds(
+                    [channel],
+                    [LEDBasicState.ON if random.randrange(2) else LEDBasicState.OFF],
+                ),
+                timeout=5,
+            )
+        await led_client.switch_all_leds_on()
+
+        for channel in set(led_client.channels.values()):
+            assert channel.status is LEDBasicState.ON
 
     async def test_bad_configs(self) -> None:
         # test various bad yamls, missing required values
