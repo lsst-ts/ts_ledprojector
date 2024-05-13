@@ -81,12 +81,20 @@ properties:
             minItems: 1
             items:
               type: string
+        dac_mapping:
+            description: >-
+                LabJack DAC mapping to the LED channel names, in order of the field array.
+            type: array
+            minItems: 1
+            items:
+              type: string
       required:
         - topic_name
         - sensor_name
         - location
         - led_names
         - channel_names
+        - dac_mapping
       additionalProperties: false
 required:
   - device_type
