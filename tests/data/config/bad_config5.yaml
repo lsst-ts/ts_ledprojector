@@ -7,4 +7,6 @@ topics:
     sensor_name: labjack_test_1
     led_names: [M375L4, M445L4, M505L4, M565L4]
     channel_names: [DIO1, FIO0, CIO3, EIO3]
+    dac_mapping: [DAC0, DAC0, DAC1, DAC1]
     location: somewhere, nowhere, somewhere else, guess
+    

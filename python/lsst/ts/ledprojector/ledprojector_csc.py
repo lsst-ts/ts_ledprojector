@@ -200,11 +200,13 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         if self.led_controller is None:
             raise salobj.ExpectedError("Labjack not connected")
         led_serials = await self.led_controller.switch_all_leds_off()
-        await self.evt_ledState.set_write(
-            index=0,
-            serialNumber=led_serials,
-            ledBasicState=LEDBasicState.OFF,
-        )
+        for sn in led_serials:
+            await self.evt_ledState.set_write(
+                index=0,
+                serialNumber=sn,
+                ledBasicState=self.led_controller.channels[sn].status,
+                value=self.led_controller.channels[sn].dac_value,
+            )
 
     async def do_switchAllOn(self, data: types.SimpleNamespace) -> None:
         """Switch on all LEDs.
@@ -223,11 +225,13 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         if self.led_controller is None:
             raise salobj.ExpectedError("Labjack not connected")
         led_serials = await self.led_controller.switch_all_leds_on()
-        await self.evt_ledState.set_write(
-            index=0,
-            serialNumber=led_serials,
-            ledBasicState=LEDBasicState.ON,
-        )
+        for sn in led_serials:
+            await self.evt_ledState.set_write(
+                index=0,
+                serialNumber=sn,
+                ledBasicState=self.led_controller.channels[sn].status,
+                value=self.led_controller.channels[sn].dac_value,
+            )
 
     async def switch_leds(
         self, identifiers: List[Union[str, int]], on_off: LEDBasicState
@@ -247,11 +251,78 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         salobj.ExpectedError
             If labjack isnt connected first
         """
+        self.assert_enabled()
         if self.led_controller is None:
             raise salobj.ExpectedError("Labjack not connected")
         await self.led_controller.switch_multiple_leds(identifiers, on_off)
-        # TODO add evtledstate here
-        # TODO remove index from xml
+
+    async def do_adjustDACPower(self, data: types.SimpleNamespace) -> None:
+        """Adjust voltage on all LEDs.
+
+        Parameters
+        ----------
+        serialNumbers : `str`
+            List of Serial number of LED to adjust.
+        dacValues : `float``
+            List of DAC Value 0-5V, 1.2mV resolution
+
+        Raises
+        ----------
+        salobj.ExpectedError
+            If labjack isnt connected first
+        """
+
+        self.assert_enabled()
+        if self.led_controller is None:
+            raise salobj.ExpectedError("Labjack not connected")
+
+        serialNumbers = data.serialNumbers.split(",")
+        dacValues = [float(value) for value in data.dacValues.split(",")]
+
+        await self.led_controller.adjust_dac_values(
+            identifiers=serialNumbers,
+            values=dacValues,
+        )
+
+        for sn in serialNumbers:
+            await self.evt_ledState.set_write(
+                serialNumber=sn,
+                ledBasicState=self.led_controller.channels[sn].status,
+                value=self.led_controller.channels[sn].dac_value,
+            )
+
+    async def do_adjustAllDACPower(self, data: types.SimpleNamespace) -> None:
+        """Adjust voltage on all DAC Channels.
+
+        Parameters
+        ----------
+        dacValue : `float``
+            DAC Value 0-5V, 1.2mV resolution
+
+        Raises
+        ----------
+        salobj.ExpectedError
+            If labjack isnt connected first
+        """
+
+        self.assert_enabled()
+        if self.led_controller is None:
+            raise salobj.ExpectedError("Labjack not connected")
+
+        dacValue = data.dacValue
+
+        await self.led_controller.adjust_all_dac_values(
+            value=dacValue,
+        )
+
+        channels = self.led_controller.channels
+
+        for channel in channels.values():
+            await self.evt_ledState.set_write(
+                serialNumber=channel.serial,
+                ledBasicState=channel.status,
+                value=channel.dac_value,
+            )
 
     async def do_switchOn(self, data: types.SimpleNamespace) -> None:
         """Switch on one or more LEDs.
@@ -263,13 +334,21 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
             LED serial number, or the labjack port to turn on.
         """
         self.assert_enabled()
+        if self.led_controller is None:
+            raise salobj.ExpectedError("Labjack not connected")
 
-        await self.switch_leds([data.serialNumber], [LEDBasicState.ON])
-        await self.evt_ledState.set_write(
-            index=0,
-            serialNumber=data.serialNumber,
-            ledBasicState=LEDBasicState.ON,
+        serialNumbers = data.serialNumbers.split(",")
+
+        await self.switch_leds(
+            serialNumbers, [LEDBasicState.ON for _ in range(len(serialNumbers))]
         )
+
+        for sn in serialNumbers:
+            await self.evt_ledState.set_write(
+                serialNumber=sn,
+                ledBasicState=self.led_controller.channels[sn].status,
+                value=self.led_controller.channels[sn].dac_value,
+            )
 
     async def do_switchOff(self, data: types.SimpleNamespace) -> None:
         """Switch off one or more specific led.
@@ -281,13 +360,21 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
             LED serial number, or the labjack port to turn off.
         """
         self.assert_enabled()
+        if self.led_controller is None:
+            raise salobj.ExpectedError("Labjack not connected")
 
-        await self.switch_leds([data.serialNumber], [LEDBasicState.OFF])
-        await self.evt_ledState.set_write(
-            index=0,
-            serialNumber=data.serialNumber,
-            ledBasicState=LEDBasicState.OFF,
+        serialNumbers = data.serialNumbers.split(",")
+
+        await self.switch_leds(
+            serialNumbers, [LEDBasicState.OFF for _ in range(len(serialNumbers))]
         )
+
+        for sn in serialNumbers:
+            await self.evt_ledState.set_write(
+                serialNumber=sn,
+                ledBasicState=self.led_controller.channels[sn].status,
+                value=self.led_controller.channels[sn].dac_value,
+            )
 
 
 def run_ledprojector() -> None:

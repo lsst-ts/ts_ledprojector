@@ -52,8 +52,10 @@ class CscTestCase(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
                 enabled_commands=(
                     "switchAllOn",
                     "switchAllOff",
-                    "switchLEDsOn",
-                    "switchLEDsOff",
+                    "switchOn",
+                    "switchOff",
+                    "adjustAllDACPower",
+                    "adjustDACPower",
                 ),
             )
 
@@ -81,23 +83,23 @@ class CscTestCase(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             simulation_mode=1,
         ):
             await self.remote.cmd_switchOn.set_start(
-                serialNumber="M375L4", timeout=SHORT_TIMEOUT
+                serialNumbers="M375L4", timeout=SHORT_TIMEOUT
             )
 
             await self.assert_next_sample(
                 topic=self.remote.evt_ledState,
-                index=0,  # deprecate
                 serialNumber="M375L4",
                 ledBasicState=LEDBasicState.ON,
+                value=0,
             )
 
             await self.remote.cmd_switchOff.set_start(
-                serialNumber="M375L4", timeout=SHORT_TIMEOUT
+                serialNumbers="M375L4", timeout=SHORT_TIMEOUT
             )
 
             await self.assert_next_sample(
                 topic=self.remote.evt_ledState,
-                index=0,  # deprecate
                 serialNumber="M375L4",
                 ledBasicState=LEDBasicState.OFF,
+                value=0,
             )

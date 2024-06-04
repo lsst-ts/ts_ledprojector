@@ -32,7 +32,6 @@ from typing import TypeAlias
 import yaml
 from jsonschema.exceptions import ValidationError
 from lsst.ts import ledprojector, salobj
-from lsst.ts.ess import common, labjack
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
 logging.basicConfig(
@@ -80,7 +79,7 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
         assert led_client.simulation_mode == 1
         assert isinstance(led_client.log, logging.Logger)
         topic = config.topics[0]
-        assert len(topic) == 5
+        assert len(topic) == 6
         assert len(topic["channel_names"]) == 4
         await self.valid_list(
             validList=["DIO1", "FIO0", "CIO3", "EIO3"],
@@ -98,11 +97,10 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
             listToTest=topic["led_names"],
         )
 
-    async def test_registry(self) -> None:
-        data_client_class = common.data_client.get_data_client_class(
-            "LabJackDataClient"
+        assert len(topic["dac_mapping"]) == len(topic["led_names"])
+        await self.valid_list(
+            validList=["DAC0", "DAC0", "DAC1", "DAC1"], listToTest=topic["dac_mapping"]
         )
-        assert data_client_class is labjack.LabJackDataClient
 
     async def test_state_change(self) -> None:
         config = self.get_config("config.yaml")
@@ -160,18 +158,18 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
             if state not in [LEDBasicState.ON, LEDBasicState.OFF]:
                 with self.assertRaises(TypeError):
                     await asyncio.wait_for(
-                        led_client.switch_led("M375L4", state), timeout=5
+                        led_client.switch_multiple_leds(["M375L4"], [state]), timeout=5
                     )
 
         # accept proper values and go by multiple identifiers
         await asyncio.wait_for(
-            led_client.switch_led("M375L4", LEDBasicState.ON), timeout=5
+            led_client.switch_multiple_leds(["M375L4"], [LEDBasicState.ON]), timeout=5
         )
         assert led_client.get_state("DIO1") is LEDBasicState.ON
         assert led_client.get_state("M375L4") is LEDBasicState.ON
         assert led_client.get_state(0) is LEDBasicState.ON
 
-        await led_client.switch_led("CIO3", LEDBasicState.OFF)
+        await led_client.switch_multiple_leds(["CIO3"], [LEDBasicState.OFF])
         assert led_client.get_state("CIO3") is LEDBasicState.OFF
         assert led_client.get_state("M505L4") is LEDBasicState.OFF
         assert led_client.get_state(2) is LEDBasicState.OFF
@@ -258,6 +256,64 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
 
         for channel in set(led_client.channels.values()):
             assert channel.status is LEDBasicState.ON
+
+    async def test_adjust_dac_value(self) -> None:
+        config = self.get_config("config.yaml")
+        led_client = ledprojector.LEDController(
+            config=config,
+            log=self.log,
+            simulate=True,
+        )
+        # turn all leds on
+        await led_client.switch_all_leds_on()
+
+        for channel in set(led_client.channels.values()):
+            assert channel.status is LEDBasicState.ON
+
+        # test good values
+        topic = config.topics[0]
+        print("\nTEST!: " + str(topic["led_names"]))
+        for channel in topic["led_names"]:
+            await asyncio.wait_for(
+                led_client.adjust_dac_values(
+                    [channel],
+                    [random.randrange(0, 5)],
+                ),
+                timeout=5,
+            )
+
+        # test bad values
+        with self.assertRaises(ValueError):
+            await asyncio.wait_for(
+                led_client.adjust_dac_values(["CIO3"], [6000]),
+                timeout=5,
+            )
+
+        with self.assertRaises(ValueError):
+            await asyncio.wait_for(
+                led_client.adjust_dac_values(
+                    ["ASDF"],
+                    [3],
+                ),
+                timeout=5,
+            )
+
+        # test multiple
+        await asyncio.wait_for(
+            led_client.adjust_dac_values(
+                topic["led_names"][:-2],
+                [random.randrange(0, 5)],
+            ),
+            timeout=5,
+        )
+
+        # test all
+        await asyncio.wait_for(
+            led_client.adjust_all_dac_values(
+                value=random.randrange(0, 5),
+            ),
+            timeout=5,
+        )
 
     async def test_bad_configs(self) -> None:
         # test various bad yamls, missing required values

@@ -36,6 +36,8 @@ from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
 # Time limit for communicating with the LabJack (seconds).
 COMMUNICATION_TIMEOUT = 5
+# Sleep time before trying to reconnect (seconds).
+RECONNECT_WAIT = 60
 
 
 class LabjackChannel:
@@ -61,19 +63,36 @@ class LabjackChannel:
 
     def __init__(
         self,
-        serial_number: str,
         channel: str,
+        serial_number: str = "",
         index: int = -1,
+        dac_value: Union[float, int] = 0.0,
+        dac_chan: str = "DAC0",
         status: LEDBasicState = LEDBasicState.UNKNOWN,
     ):
         self.serial = serial_number
         self.channel = channel
         self.index = index
+        self.max_dac_value = 5.0
+        self.min_dac_value = 0.0
+        if dac_value > self.max_dac_value or dac_value < self.min_dac_value:
+            raise ValueError(
+                f"Attempted dac value of {dac_value} not within range of accepted values,"
+                f" min: {self.min_dac_value} max: {self.max_dac_value}"
+            )
+        self.valid_dac_chan_list = ["DAC0", "DAC1"]
+        if dac_chan not in self.valid_dac_chan_list:
+            raise ValueError(
+                f"Attempted dac chan of {dac_chan} not valid: {self.valid_dac_chan_list}"
+            )
+        self._dac_value = dac_value
+        self._dac_chan = dac_chan
         self.status = status
 
         # modbus channel dictionary
         self.offset_dict = {
             "AIN": 0,
+            "DAC": 1000,
             "DIO": 2000,
             "FIO": 2000,
             "EIO": 2008,
@@ -97,14 +116,81 @@ class LabjackChannel:
 
         # AIN are 32-bit wide, so their address takes up 2
         # addresses for the LSB/MSB
-        if self.channel[:3] == "AIN":
+        if self.channel[:3] == "AIN" or self.channel[:3] == "DAC":
             addNum *= 2
         else:
             # all other DIO is standard 16-bit wide transmission
             addNum += self.offset_dict[self.channel[:3]]
         return addNum
 
-    def value(self, state_to_write: LEDBasicState) -> bool:
+    def dac_address(self) -> int:
+        """Convert labjack channel name to their respective modbus address.
+
+        Returns
+        -------
+        addNum : `int`
+            Modbus address of the ljm channel.
+        """
+        addNum = int(self._dac_chan[3:])
+
+        # AIN are 32-bit wide, so their address takes up 2
+        # addresses for the LSB/MSB
+        if self._dac_chan[:3] == "AIN" or self._dac_chan[:3] == "DAC":
+            addNum *= 2
+        else:
+            # all other DIO is standard 16-bit wide transmission
+            addNum += self.offset_dict[self._dac_chan[:3]]
+        return addNum
+
+    def check_valid(self, value: Union[LEDBasicState, bool, float, int]) -> bool:
+        """Wrapper to if value written is valid for labjack channel
+
+        Parameters
+        ----------
+        value : `LEDBasicState` or `float`
+            value to test
+
+        Returns
+        -------
+        valid : `bool`
+            True/False if channel type will accept value
+        """
+        if self.channel[:3] == "DAC":
+            if isinstance(value, float) or isinstance(value, int):
+                return True
+        if isinstance(value, LEDBasicState):
+            if value == LEDBasicState.ON or value == LEDBasicState.OFF:
+                return True
+        if isinstance(value, bool):
+            return True
+        return False
+
+    @property
+    def dac_value(self) -> float:
+        return self._dac_value
+
+    @dac_value.setter
+    def dac_value(self, value_to_set: Union[int, float]) -> None:
+        if value_to_set > self.max_dac_value or value_to_set < self.min_dac_value:
+            raise ValueError(
+                f"Attempted dac value of {value_to_set} not within range of accepted values,"
+                f" min: {self.min_dac_value} max: {self.max_dac_value}"
+            )
+        self._dac_value = value_to_set
+
+    @property
+    def dac_chan(self) -> str:
+        return self._dac_chan
+
+    @dac_chan.setter
+    def dac_chan(self, chan_to_set: str) -> None:
+        if chan_to_set not in self.valid_dac_chan_list:
+            raise ValueError(
+                f"Attempted dac chan of {chan_to_set} not valid: {self.valid_dac_chan_list}"
+            )
+        self._dac_chan = chan_to_set
+
+    def value(self, state_to_write: Union[float, LEDBasicState]) -> Union[bool, float]:
         """Wrapper to convert ON/OFF to the actual value to write
 
         Parameters
@@ -118,7 +204,10 @@ class LabjackChannel:
         state : `bool`
             Proper True/False to send to labjack
         """
-        return False if state_to_write == LEDBasicState.ON else True
+        if self.channel[:3] == "DAC":
+            return state_to_write
+        else:
+            return False if state_to_write == LEDBasicState.ON else True
 
 
 class LEDController(BaseLabJackDataClient):
@@ -169,6 +258,7 @@ class LEDController(BaseLabJackDataClient):
         # Extract the serial and lbj channel name lists
         self.led_names = led_topic["led_names"]
         channel_names = led_topic["channel_names"]
+        dac_mapping = led_topic["dac_mapping"]
 
         self.log.info(f"Opening led_controller with led names {self.led_names}")
         self.log.info(f"Opening led_controller with channel names {channel_names}")
@@ -179,7 +269,12 @@ class LEDController(BaseLabJackDataClient):
         # Now make a list of labjackchannel objs using the previous list's info
         # Note that we use enumerate to get the numerical index
         full_key_tuple = [
-            LabjackChannel(serial_number=data[0], channel=data[1], index=ind)
+            LabjackChannel(
+                serial_number=data[0],
+                channel=data[1],
+                index=ind,
+                dac_chan=dac_mapping[ind],
+            )
             for ind, data in enumerate(partial_key_tuple, start=0)
         ]
         # Now create our multi-key dictionary
@@ -252,12 +347,20 @@ properties:
             minItems: 1
             items:
               type: string
+        dac_mapping:
+            description: >-
+                LabJack DAC mapping to the LED channel names, in order of the field array.
+            type: array
+            minItems: 1
+            items:
+              type: string
       required:
         - topic_name
         - sensor_name
         - location
         - led_names
         - channel_names
+        - dac_mapping
       additionalProperties: false
 required:
   - device_type
@@ -274,6 +377,15 @@ additionalProperties: false
         common.BaseDataClient requires that we define it:
             TypeError: Can't instantiate abstract class
                         LEDController with abstract method run
+        """
+        pass
+
+    async def read_data(self) -> None:
+        """
+        There is no use in constantly reading labjack status, so leave empty.
+        common.BaseDataClient requires that we define it:
+            TypeError: Can't instantiate abstract class
+                        LEDController with abstract method read_data
         """
         pass
 
@@ -331,30 +443,102 @@ additionalProperties: false
         else:
             raise RuntimeError("Given identifier doesn't exist")
 
-    async def switch_led(
+    def _blocking_adjust_dac_values(
         self,
-        identifier: str | int,
-        led_state: LEDBasicState,
+        identifiers: List[Union[str, int]],
+        values: List[Union[float, int]],
     ) -> None:
-        """Run a blocking function in a thread pool executor.
-
-        Only one function will run at a time, because all calls use the same
-        thread pool executor, which only has a single thread.
+        """Adjust DAC channel values
 
         Parameters
         ----------
-        identifier : `str` | `int`
-            The serial number of the LED, port of the labjack,
-            or a 0-indexed identifier
-        led_state : `LEDBasicState`
-            ON to switch LED on, OFF to switch LED off
+        identifiers : List of `str` | `int`
+            Serial number of LED or 0-indexed identifier
+        values : List of `int` | `float`
+            0-5.0 voltage to adjust DAC channel to
 
         Raises
         ------
-        TypeError
-            If the led_state given is invalid
+        ValueError
+            If the dac_value given is invalid
         Exception
-            If the blocking switch LED failed
+            If the command to labjack fails
+        """
+
+        channels_currently_on = []
+        values_to_set = []
+
+        # Check that led_state is valid
+        for identifier, value in zip(identifiers, values):
+            if identifier not in self.channels:
+                raise ValueError(f"{identifier} not in channel list: {self.channels}")
+
+            self.channels[identifier].dac_value = float(value)
+
+            # Check if led is currently on
+            if self.get_state(identifier) == LEDBasicState.ON:
+                channels_currently_on.append(self.channels[identifier].dac_address())
+                values_to_set.append(self.channels[identifier].dac_value)
+
+        # if its on, we need to adjust the DAC chan value on the labjack
+        if len(channels_currently_on) != 0:
+            if self.handle is None:
+                try:
+                    self.log.warning(
+                        "Labjack not explicitly connected when calling switch_led,"
+                        " attempting to connect now..."
+                    )
+                    self._blocking_connect()
+                except RuntimeError:
+                    raise RuntimeError("Labjack unable to connect")
+
+            try:
+                ljm.eWriteAddresses(
+                    self.handle,
+                    len(channels_currently_on),
+                    channels_currently_on,
+                    [ljm.constants.FLOAT32 for _ in range(len(values_to_set))],
+                    values_to_set,
+                )
+            except ljm.LJMError as ljm_error:
+                # Set up log string
+                error_code = ljm_error.errorCode
+                error_string = str(ljm_error)
+                log_string = str(
+                    f"Labjack reported error#{error_code} during eWriteAddress"
+                    f"in switch_led, dumping values: "
+                    f"identifier: {identifier} dac value: {values} "
+                    f"handle: {self.handle} address: {channels_currently_on} "
+                    f"data_type: {ljm.constants.FLOAT32} value_written: {values_to_set} "
+                    f"ljm_error_string: {error_string}"
+                )
+
+                # If error then raise except else its a warning so continue
+                if error_code > ljm.errorcodes.WARNINGS_END:
+                    self.log.exception(log_string)
+                    raise RuntimeError(f"ljm reported error, see log: {log_string}")
+                self.log.warning(log_string)
+
+    async def adjust_dac_values(
+        self,
+        identifiers: List[Union[str, int]],
+        values: List[Union[float, int]],
+    ) -> None:
+        """Adjust list of DAC channel value
+
+        Parameters
+        ----------
+        identifiers : list of `str` | `int`
+            Serial number of LED or 0-indexed identifier
+        values : list of `int` | `float`
+            0-5.0 voltage to adjust DAC channel to
+
+        Raises
+        ------
+        ValueError
+            If the dac_value given is invalid
+        Exception
+            If the command to labjack fails
         """
         loop = asyncio.get_running_loop()
         try:
@@ -362,9 +546,9 @@ additionalProperties: false
                 loop.run_in_executor(
                     self._thread_pool,
                     functools.partial(
-                        self._blocking_switch_led,
-                        identifier=identifier,
-                        led_state=led_state,
+                        self._blocking_adjust_dac_values,
+                        identifiers=identifiers,
+                        values=values,
                     ),
                 ),
                 timeout=COMMUNICATION_TIMEOUT,
@@ -372,49 +556,44 @@ additionalProperties: false
         except asyncio.CancelledError:
             self.log.info(
                 "run_in_thread cancelled while "
-                f"running blocking function {self._blocking_switch_multiple_leds}."
+                f"running blocking function {self._blocking_adjust_dac_values}."
             )
-        except TypeError:
-            self.log.exception("Invalid led_state to switch LED to")
+        except ValueError:
+            self.log.exception("Invalid DAC Value to set")
             raise
         except Exception:
             self.log.exception(
-                f"Blocking function {self._blocking_switch_multiple_leds} failed."
+                f"Blocking function {self._blocking_adjust_dac_values} failed."
             )
             raise
 
-    def _blocking_switch_led(
+    def _blocking_adjust_all_dac_values(
         self,
-        identifier: str | int,
-        led_state: LEDBasicState,
+        value: Union[float, int],
     ) -> None:
-        """Switch the LED on/off.
+        """Adjust all DAC channel values
 
         Parameters
         ----------
-        identifier : `str` | `int`
-            The serial number of the LED, port of the labjack,
-            or a 0-indexed identifier
-        led_state : `LEDBasicState`
-            ON to switch LED on, OFF to switch LED off
+        value : `int` | `float`
+            0-5.0 voltage to adjust DAC channel to
 
         Raises
         ------
-        RuntimeError
-            If the Labjack cannot connect
-            If the Labjack reports back an error
-        TypeError
-            If led_state is not ON or OFF
+        ValueError
+            If the dac_value given is invalid
+        Exception
+            If the command to labjack fails
         """
-        # Check that led_state is valid
-        if led_state not in [LEDBasicState.ON, LEDBasicState.OFF]:
-            raise TypeError("Invalid led_state to switch LED to")
+        unique_dac_channels = []
+        values_to_set = []
+        for channel in self.channels.values():
+            channel.dac_value = float(value)
+            if channel.dac_address() not in unique_dac_channels:
+                unique_dac_channels.append(channel.dac_address())
+                values_to_set.append(value)
 
-        # Check we are not already in that state.
-        if self.get_state(identifier) == led_state:
-            self.log.warning(f"LED {identifier} is already {led_state}")
-            return
-
+        # if its on, we need to adjust the DAC chan value on the labjack
         if self.handle is None:
             try:
                 self.log.warning(
@@ -425,12 +604,14 @@ additionalProperties: false
             except RuntimeError:
                 raise RuntimeError("Labjack unable to connect")
 
-        # switch the LED.
-        address = self.channels[identifier].address()
-        value = self.channels[identifier].value(led_state)
-
         try:
-            ljm.eWriteAddress(self.handle, address, ljm.constants.UINT16, value)
+            ljm.eWriteAddresses(
+                self.handle,
+                len(unique_dac_channels),
+                unique_dac_channels,
+                [ljm.constants.FLOAT32 for _ in range(len(values_to_set))],
+                values_to_set,
+            )
         except ljm.LJMError as ljm_error:
             # Set up log string
             error_code = ljm_error.errorCode
@@ -438,9 +619,9 @@ additionalProperties: false
             log_string = str(
                 f"Labjack reported error#{error_code} during eWriteAddress"
                 f"in switch_led, dumping values: "
-                f"identifier: {identifier} led_state: {led_state} "
-                f"handle: {self.handle} address: {address} "
-                f"data_type: {ljm.constants.UINT16} value_written: {value} "
+                f"dac value: {value} "
+                f"handle: {self.handle} address: {unique_dac_channels} "
+                f"data_type: {ljm.constants.FLOAT32} value_written: {values_to_set} "
                 f"ljm_error_string: {error_string}"
             )
 
@@ -450,9 +631,49 @@ additionalProperties: false
                 raise RuntimeError(f"ljm reported error, see log: {log_string}")
             self.log.warning(log_string)
 
-        # None of the warnings are egregious, so the state should have changed
-        # Update state
-        self._set_state(identifier, led_state)
+    async def adjust_all_dac_values(
+        self,
+        value: Union[float, int],
+    ) -> None:
+        """Adjust list of DAC channel value
+
+        Parameters
+        ----------
+        value : `int` | `float`
+            0-5.0 voltage to adjust DAC channel to
+
+        Raises
+        ------
+        ValueError
+            If the dac_value given is invalid
+        Exception
+            If the command to labjack fails
+        """
+        loop = asyncio.get_running_loop()
+        try:
+            await asyncio.wait_for(
+                loop.run_in_executor(
+                    self._thread_pool,
+                    functools.partial(
+                        self._blocking_adjust_all_dac_values,
+                        value=value,
+                    ),
+                ),
+                timeout=COMMUNICATION_TIMEOUT,
+            )
+        except asyncio.CancelledError:
+            self.log.info(
+                "run_in_thread cancelled while "
+                f"running blocking function {self._blocking_adjust_all_dac_values}."
+            )
+        except ValueError:
+            self.log.exception("Invalid DAC Value to set")
+            raise
+        except Exception:
+            self.log.exception(
+                f"Blocking function {self._blocking_adjust_dac_values} failed."
+            )
+            raise
 
     async def switch_all_leds_off(self) -> List[str]:
         """Switch ALL LEDs off"""
