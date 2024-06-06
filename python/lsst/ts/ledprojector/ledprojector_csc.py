@@ -26,8 +26,8 @@ import types
 from typing import Any, List, Union
 
 from lsst.ts import salobj
-from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 from lsst.ts.xml.component_info import ComponentInfo
+from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
 from . import __version__
 from .config_schema import CONFIG_SCHEMA
@@ -347,12 +347,12 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         self.assert_enabled()
         if self.led_controller is None:
             raise salobj.ExpectedError("Labjack not connected")
-        
+
         try:
             data.index
         except AttributeError:
             pass
-        
+
         try:
             serialNumbers = data.serialNumbers.split(",")
         except AttributeError:
@@ -386,7 +386,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         if self.led_controller is None:
             raise salobj.ExpectedError("Labjack not connected")
 
-        #TODO DM-44713 Remove when XML v21 is released.
+        # TODO DM-44713 Remove when XML v21 is released.
         try:
             serialNumbers = data.serialNumbers.split(",")
         except AttributeError:
@@ -397,7 +397,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         )
 
         for sn in serialNumbers:
-        #TODO DM-44713 Remove when XML v21 is released.
+            # TODO DM-44713 Remove when XML v21 is released.
             try:
                 self.evt_ledState.set(value=self.led_controller.channels[sn].dac_value)
             except AttributeError:

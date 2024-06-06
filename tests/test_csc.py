@@ -82,11 +82,9 @@ class CscTestCase(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             config_dir=TEST_CONFIG_DIR,
             simulation_mode=1,
         ):
-            #TODO DM-44713 Remove when XML v21 is released.
+            # TODO DM-44713 Remove when XML v21 is released.
             try:
-                self.remote.cmd_switchOn.set(
-                    serialNumbers="M375L4"
-                )
+                self.remote.cmd_switchOn.set(serialNumbers="M375L4")
             except AttributeError:
                 self.remote.cmd_switchOn.set(serialNumber="M375L4")
 
@@ -97,22 +95,20 @@ class CscTestCase(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             )
             assert led_state.serialNumber == "M375L4"
             assert led_state.ledBasicState == LEDBasicState.ON
-            
-            #TODO DM-44713 Remove when XML v21 is released.
+
+            # TODO DM-44713 Remove when XML v21 is released.
             try:
                 value = led_state.value
                 assert value == 0
             except AttributeError:
                 pass
 
-            #TODO DM-44713 Remove when XML v21 is released.
+            # TODO DM-44713 Remove when XML v21 is released.
             try:
-                self.remote.cmd_switchOff.set(
-                    serialNumbers="M375L4"
-                )
+                self.remote.cmd_switchOff.set(serialNumbers="M375L4")
             except AttributeError:
                 self.remote.cmd_switchOff.set(serialNumber="M375L4")
-            
+
             await self.remote.cmd_switchOff.start(timeout=SHORT_TIMEOUT)
 
             led_state = await self.assert_next_sample(
@@ -120,7 +116,7 @@ class CscTestCase(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
                 serialNumber="M375L4",
                 ledBasicState=LEDBasicState.OFF,
             )
-            #TODO DM-44713 Remove when XML v21 is released.
+            # TODO DM-44713 Remove when XML v21 is released.
             try:
                 value = led_state.value
                 assert value == 0
