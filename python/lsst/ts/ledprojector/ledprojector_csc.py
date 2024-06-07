@@ -77,6 +77,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
 
         self.config = None
 
+        # TODO DM-44713 Remove when XML v21 is released.
         additional_commands = ["adjustDACPower", "adjustAllDACPower"]
         component_info = ComponentInfo("LEDProjector", topic_subname="sal")
         for additional_command in additional_commands:
@@ -267,6 +268,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
             raise salobj.ExpectedError("Labjack not connected")
         await self.led_controller.switch_multiple_leds(identifiers, on_off)
 
+    # TODO DM-44713 Remove when XML v21 is released.
     async def _do_adjustDACPower(self, data: types.SimpleNamespace) -> None:
         """Adjust voltage on all LEDs.
 
@@ -302,6 +304,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
                 value=self.led_controller.channels[sn].dac_value,
             )
 
+    # TODO DM-44713 Remove when XML v21 is released.
     async def _do_adjustAllDACPower(self, data: types.SimpleNamespace) -> None:
         """Adjust voltage on all DAC Channels.
 
@@ -348,6 +351,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         if self.led_controller is None:
             raise salobj.ExpectedError("Labjack not connected")
 
+        # Used to ignore index in old XML calls.
         try:
             data.index
         except AttributeError:
@@ -363,6 +367,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         )
 
         for sn in serialNumbers:
+            # TODO DM-44713 Remove when XML v21 is released.
             try:
                 self.evt_ledState.set(value=self.led_controller.channels[sn].dac_value)
             except AttributeError:
