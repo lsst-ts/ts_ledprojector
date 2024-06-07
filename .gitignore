@@ -35,3 +35,7 @@ towncrier.toml
 
 # VsCode
 *.vscode
+.flake8
+.isort.cfg
+.mypy.ini
+.ruff.toml

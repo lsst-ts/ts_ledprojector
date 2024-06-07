@@ -82,24 +82,43 @@ class CscTestCase(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             config_dir=TEST_CONFIG_DIR,
             simulation_mode=1,
         ):
-            await self.remote.cmd_switchOn.set_start(
-                serialNumbers="M375L4", timeout=SHORT_TIMEOUT
-            )
+            # TODO DM-44713 Remove when XML v21 is released.
+            try:
+                self.remote.cmd_switchOn.set(serialNumbers="M375L4")
+            except AttributeError:
+                self.remote.cmd_switchOn.set(serialNumber="M375L4")
 
-            await self.assert_next_sample(
+            await self.remote.cmd_switchOn.start(timeout=SHORT_TIMEOUT)
+
+            led_state = await self.assert_next_sample(
                 topic=self.remote.evt_ledState,
-                serialNumber="M375L4",
-                ledBasicState=LEDBasicState.ON,
-                value=0,
             )
+            assert led_state.serialNumber == "M375L4"
+            assert led_state.ledBasicState == LEDBasicState.ON
 
-            await self.remote.cmd_switchOff.set_start(
-                serialNumbers="M375L4", timeout=SHORT_TIMEOUT
-            )
+            # TODO DM-44713 Remove when XML v21 is released.
+            try:
+                value = led_state.value
+                assert value == 0
+            except AttributeError:
+                pass
 
-            await self.assert_next_sample(
+            # TODO DM-44713 Remove when XML v21 is released.
+            try:
+                self.remote.cmd_switchOff.set(serialNumbers="M375L4")
+            except AttributeError:
+                self.remote.cmd_switchOff.set(serialNumber="M375L4")
+
+            await self.remote.cmd_switchOff.start(timeout=SHORT_TIMEOUT)
+
+            led_state = await self.assert_next_sample(
                 topic=self.remote.evt_ledState,
                 serialNumber="M375L4",
                 ledBasicState=LEDBasicState.OFF,
-                value=0,
             )
+            # TODO DM-44713 Remove when XML v21 is released.
+            try:
+                value = led_state.value
+                assert value == 0
+            except AttributeError:
+                pass

@@ -1,2 +1,2 @@
 @Library('JenkinsShared')_
-CondaPipeline([], "ts-ledprojector", "lsst.ts.ledprojector", "noarch")
+CondaPipeline(["ts_config_mtcalsys"], "ts-ledprojector", "lsst.ts.ledprojector", "noarch")
