@@ -29,7 +29,7 @@ import yaml
 CONFIG_SCHEMA = yaml.safe_load(
     """
 schema: http://json-schema.org/draft-07/schema#
-title: LEDProjector v1
+title: LEDProjector v2
 description: Schema for LEDController
 type: object
 properties:
