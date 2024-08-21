@@ -26,7 +26,6 @@ import types
 from typing import Any, List, Union
 
 from lsst.ts import salobj
-from lsst.ts.xml.component_info import ComponentInfo
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
 from . import __version__
