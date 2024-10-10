@@ -118,9 +118,8 @@ class LabjackChannel:
         # addresses for the LSB/MSB
         if self.channel[:3] == "AIN" or self.channel[:3] == "DAC":
             addNum *= 2
-        else:
-            # all other DIO is standard 16-bit wide transmission
-            addNum += self.offset_dict[self.channel[:3]]
+        # all other DIO is standard 16-bit wide transmission
+        addNum += self.offset_dict[self.channel[:3]]
         return addNum
 
     def dac_address(self) -> int:
@@ -137,9 +136,8 @@ class LabjackChannel:
         # addresses for the LSB/MSB
         if self._dac_chan[:3] == "AIN" or self._dac_chan[:3] == "DAC":
             addNum *= 2
-        else:
-            # all other DIO is standard 16-bit wide transmission
-            addNum += self.offset_dict[self._dac_chan[:3]]
+        # all other DIO is standard 16-bit wide transmission
+        addNum += self.offset_dict[self._dac_chan[:3]]
         return addNum
 
     def check_valid(self, value: Union[LEDBasicState, bool, float, int]) -> bool:
@@ -475,10 +473,8 @@ additionalProperties: false
 
             self.channels[identifier].dac_value = float(value)
 
-            # Check if led is currently on
-            if self.get_state(identifier) == LEDBasicState.ON:
-                channels_currently_on.append(self.channels[identifier].dac_address())
-                values_to_set.append(self.channels[identifier].dac_value)
+            channels_currently_on.append(self.channels[identifier].dac_address())
+            values_to_set.append(self.channels[identifier].dac_value)
 
         # if its on, we need to adjust the DAC chan value on the labjack
         if len(channels_currently_on) != 0:
