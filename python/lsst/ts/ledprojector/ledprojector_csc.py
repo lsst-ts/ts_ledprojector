@@ -26,7 +26,6 @@ import types
 from typing import Any, List, Union
 
 from lsst.ts import salobj
-from lsst.ts.xml.component_info import ComponentInfo
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
 from . import __version__
@@ -76,17 +75,6 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         self.should_be_connected = False
 
         self.config = None
-
-        # TODO DM-44713 Remove when XML v21 is released.
-        additional_commands = ["adjustDACPower", "adjustAllDACPower"]
-        component_info = ComponentInfo("LEDProjector", topic_subname="sal")
-        for additional_command in additional_commands:
-            if f"cmd_{additional_command}" in component_info.topics:
-                setattr(
-                    self,
-                    f"do_{additional_command}",
-                    getattr(self, f"_do_{additional_command}"),
-                )
 
         super().__init__(
             name="LEDProjector",
@@ -268,8 +256,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
             raise salobj.ExpectedError("Labjack not connected")
         await self.led_controller.switch_multiple_leds(identifiers, on_off)
 
-    # TODO DM-44713 Remove when XML v21 is released.
-    async def _do_adjustDACPower(self, data: types.SimpleNamespace) -> None:
+    async def do_adjustDACPower(self, data: types.SimpleNamespace) -> None:
         """Adjust voltage on all LEDs.
 
         Parameters
@@ -304,8 +291,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
                 value=self.led_controller.channels[sn].dac_value,
             )
 
-    # TODO DM-44713 Remove when XML v21 is released.
-    async def _do_adjustAllDACPower(self, data: types.SimpleNamespace) -> None:
+    async def do_adjustAllDACPower(self, data: types.SimpleNamespace) -> None:
         """Adjust voltage on all DAC Channels.
 
         Parameters
@@ -367,11 +353,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         )
 
         for sn in serialNumbers:
-            # TODO DM-44713 Remove when XML v21 is released.
-            try:
-                self.evt_ledState.set(value=self.led_controller.channels[sn].dac_value)
-            except AttributeError:
-                pass
+            self.evt_ledState.set(value=self.led_controller.channels[sn].dac_value)
             self.evt_ledState.set(
                 serialNumber=sn,
                 ledBasicState=self.led_controller.channels[sn].status,
@@ -391,22 +373,14 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         if self.led_controller is None:
             raise salobj.ExpectedError("Labjack not connected")
 
-        # TODO DM-44713 Remove when XML v21 is released.
-        try:
-            serialNumbers = data.serialNumbers.split(",")
-        except AttributeError:
-            serialNumbers = data.serialNumber.split(",")
+        serialNumbers = data.serialNumbers.split(",")
 
         await self.switch_leds(
             serialNumbers, [LEDBasicState.OFF for _ in range(len(serialNumbers))]
         )
 
         for sn in serialNumbers:
-            # TODO DM-44713 Remove when XML v21 is released.
-            try:
-                self.evt_ledState.set(value=self.led_controller.channels[sn].dac_value)
-            except AttributeError:
-                pass
+            self.evt_ledState.set(value=self.led_controller.channels[sn].dac_value)
             self.evt_ledState.set(
                 serialNumber=sn,
                 ledBasicState=self.led_controller.channels[sn].status,

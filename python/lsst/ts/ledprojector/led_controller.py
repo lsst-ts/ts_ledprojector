@@ -416,7 +416,7 @@ additionalProperties: false
             raise RuntimeError("Given identifier doesn't exist")
 
     def _set_state(self, identifier: str | int, status: LEDBasicState) -> None:
-        """Set status.
+        """Set status
 
         Parameters
         ----------
