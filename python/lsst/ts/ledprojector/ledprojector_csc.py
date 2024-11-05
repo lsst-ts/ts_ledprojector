@@ -202,7 +202,6 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         led_serials = await self.led_controller.switch_all_leds_off()
         for sn in led_serials:
             await self.evt_ledState.set_write(
-                index=0,
                 serialNumber=sn,
                 ledBasicState=self.led_controller.channels[sn].status,
                 value=self.led_controller.channels[sn].dac_value,
@@ -227,7 +226,6 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         led_serials = await self.led_controller.switch_all_leds_on()
         for sn in led_serials:
             await self.evt_ledState.set_write(
-                index=0,
                 serialNumber=sn,
                 ledBasicState=self.led_controller.channels[sn].status,
                 value=self.led_controller.channels[sn].dac_value,
