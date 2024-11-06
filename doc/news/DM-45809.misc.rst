@@ -1,1 +1,0 @@
-Removed index from event, which isn't accepted in the xml and isn't needed
