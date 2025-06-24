@@ -1,3 +1,12 @@
+ts_ledprojector v0.1.1 (2025-06-23)
+===================================
+
+Bugfixes
+--------
+
+- Added libusb to conda recipe. (`DM-49653 <https://rubinobs.atlassian.net/DM-49653>`_)
+
+
 ts_ledprojector v0.1.0 (2024-11-06)
 ===================================
 
