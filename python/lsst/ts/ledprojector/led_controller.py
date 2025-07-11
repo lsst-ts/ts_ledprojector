@@ -845,7 +845,13 @@ additionalProperties: false
         # Read each input channel, to make sure the configuration is valid.
         input_channel_names = set(lbc.channel for lbc in self.channels.values())
         num_frames = len(input_channel_names)
-        values = ljm.eReadNames(self.handle, num_frames, input_channel_names)
+        for _ in range(3):
+            try:
+                values = ljm.eReadNames(self.handle, num_frames, input_channel_names)
+                if values:
+                    break
+            except Exception:
+                self.log.exception("Read failed...Trying again.")
         if len(values) != len(input_channel_names):
             raise RuntimeError(
                 f"len(input_channel_names)={input_channel_names} != len(values)={values}"
