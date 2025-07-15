@@ -26,6 +26,7 @@ import types
 from typing import Any, List, Union
 
 from lsst.ts import salobj
+from lsst.ts import utils
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
 from . import __version__
@@ -71,10 +72,11 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         override: str = "",
         simulation_mode: bool = False,
     ) -> None:
-        self.led_controller = None
+        self.led_controller: None | LEDController = None
         self.should_be_connected = False
 
-        self.config = None
+        self.config: None | types.SimpleNamespace = None
+        self.monitor_loop_task = utils.make_done_future()
 
         super().__init__(
             name="LEDProjector",
@@ -99,6 +101,13 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         """Configure the CSC"""
         self.config = config
 
+    async def monitor_loop(self) -> None:
+        while self.controller_connected:
+            assert self.led_controller is not None
+            if not self.led_controller.connected and self.should_be_connected:
+                await self.fault(code=2, report="Lost connection.")
+            await asyncio.sleep(self.heartbeat_interval)
+
     async def handle_summary_state(self) -> None:
         """Override of the handle_summary_state function to
         create led controller object when enabled
@@ -110,29 +119,18 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
             If Led Controller should be connected but isn't
         """
         self.log.info(f"handle_summary_state {salobj.State(self.summary_state).name}")
-        if self.disabled_or_enabled and self.led_controller is None:
-            if self.should_be_connected:
-                await self.fault(
-                    code=LEDBasicState.Error,
-                    report="led controller should be connected but isn't.",
-                )
-                raise RuntimeError("LED Controller should be connected but isn't")
-            elif self.config is None:
-                raise RuntimeError(
-                    "Tried to create LEDController without a configuration. "
-                    "This is most likely a bug with the control sequence causing "
-                    "the configuration step to be skipped. Try sending the CSC back "
-                    "to STANDBY or OFFLINE and restarting it. You should report this issue."
-                )
-            self.led_controller = LEDController(
-                config=self.config,
-                log=self.log,
-                simulate=self.simulation_mode,
-            )
         if self.disabled_or_enabled:
-            await self.connect_led()
+            if not self.controller_connected:
+                assert self.config is not None
+                self.led_controller = LEDController(
+                    config=self.config, log=self.log, simulate=self.simulation_mode
+                )
+                await self.connect_led()
+            if self.monitor_loop_task.done():
+                self.monitor_loop_task = asyncio.ensure_future(self.monitor_loop())
         else:
             await self.disconnect_led()
+            self.monitor_loop_task.cancel()
 
     async def connect_led(self) -> None:
         """Connect to the LabJack and get status.
@@ -149,7 +147,6 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         #     await self.disconnect_led()
         if self.led_controller is None:
             raise RuntimeError("CSC Tried to use led controller without a valid object")
-
         async with asyncio.timeout(COMMUNICATION_TIMEOUT):
             await self.led_controller.connect()
         self.should_be_connected = True
@@ -231,9 +228,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
                 value=self.led_controller.channels[sn].dac_value,
             )
 
-    async def switch_leds(
-        self, identifiers: List[Union[str, int]], on_off: LEDBasicState
-    ) -> None:
+    async def switch_leds(self, identifiers: List[Union[str, int]], on_off: LEDBasicState) -> None:
         """Switch multiple LEDs at once.
 
         Parameters
@@ -346,9 +341,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         except AttributeError:
             serialNumbers = data.serialNumber.split(",")
 
-        await self.switch_leds(
-            serialNumbers, [LEDBasicState.ON for _ in range(len(serialNumbers))]
-        )
+        await self.switch_leds(serialNumbers, [LEDBasicState.ON for _ in range(len(serialNumbers))])
 
         for sn in serialNumbers:
             self.evt_ledState.set(value=self.led_controller.channels[sn].dac_value)
@@ -373,9 +366,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
 
         serialNumbers = data.serialNumbers.split(",")
 
-        await self.switch_leds(
-            serialNumbers, [LEDBasicState.OFF for _ in range(len(serialNumbers))]
-        )
+        await self.switch_leds(serialNumbers, [LEDBasicState.OFF for _ in range(len(serialNumbers))])
 
         for sn in serialNumbers:
             self.evt_ledState.set(value=self.led_controller.channels[sn].dac_value)

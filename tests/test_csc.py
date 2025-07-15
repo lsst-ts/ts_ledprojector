@@ -23,9 +23,11 @@ import pathlib
 import unittest
 from typing import Any
 
-from lsst.ts import ledprojector, salobj
+from lsst.ts import ledprojector
+from lsst.ts import salobj
 from lsst.ts.ledprojector import LEDProjectorCsc
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
+import pytest
 
 TEST_CONFIG_DIR = pathlib.Path(__file__).parents[1].joinpath("tests", "data", "config")
 SHORT_TIMEOUT = 5
@@ -72,9 +74,17 @@ class CscTestCase(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_bin_script(self) -> None:
-        await self.check_bin_script(
-            name="LEDProjector", index=0, exe_name="run_ledprojector"
-        )
+        await self.check_bin_script(name="LEDProjector", index=0, exe_name="run_ledprojector")
+
+    @pytest.mark.skip("Doesn't work.")
+    async def test_fault(self) -> None:
+        async with self.make_csc(
+            initial_state=salobj.State.ENABLED, config_dir=TEST_CONFIG_DIR, simulation_mode=1
+        ):
+            self.csc.led_controller.handle = None
+            self.csc.led_controller.block_handle = True
+            await self.assert_next_summary_state(salobj.State.ENABLED)
+            await self.assert_next_summary_state(salobj.State.FAULT, timeout=120)
 
     async def test_switch_leds(self) -> None:
         async with self.make_csc(

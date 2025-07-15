@@ -31,13 +31,13 @@ import yaml
 # Hide mypy error `Module "labjack" has no attribute "ljm"`.
 from labjack import ljm  # type: ignore
 from lsst.ts import utils
-from lsst.ts.ess.labjack import BaseLabJackDataClient
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
 # Time limit for communicating with the LabJack (seconds).
-COMMUNICATION_TIMEOUT = 5
+COMMUNICATION_TIMEOUT = 15
 # Sleep time before trying to reconnect (seconds).
 RECONNECT_WAIT = 60
+NUMBER_OF_CONNECTION_ATTEMPTS = 3
 
 
 class LabjackChannel:
@@ -82,9 +82,7 @@ class LabjackChannel:
             )
         self.valid_dac_chan_list = ["DAC0", "DAC1"]
         if dac_chan not in self.valid_dac_chan_list:
-            raise ValueError(
-                f"Attempted dac chan of {dac_chan} not valid: {self.valid_dac_chan_list}"
-            )
+            raise ValueError(f"Attempted dac chan of {dac_chan} not valid: {self.valid_dac_chan_list}")
         self._dac_value = dac_value
         self._dac_chan = dac_chan
         self.status = status
@@ -183,9 +181,7 @@ class LabjackChannel:
     @dac_chan.setter
     def dac_chan(self, chan_to_set: str) -> None:
         if chan_to_set not in self.valid_dac_chan_list:
-            raise ValueError(
-                f"Attempted dac chan of {chan_to_set} not valid: {self.valid_dac_chan_list}"
-            )
+            raise ValueError(f"Attempted dac chan of {chan_to_set} not valid: {self.valid_dac_chan_list}")
         self._dac_chan = chan_to_set
 
     def value(self, state_to_write: Union[float, LEDBasicState]) -> Union[bool, float]:
@@ -208,7 +204,7 @@ class LabjackChannel:
             return False if state_to_write == LEDBasicState.ON else True
 
 
-class LEDController(BaseLabJackDataClient):
+class LEDController:
     """Class to handle switching of LEDs connected to Labjack Interface
 
     Parameters
@@ -221,21 +217,17 @@ class LEDController(BaseLabJackDataClient):
         Run in simulation mode?
     """
 
+    block_handle = False
+
     def __init__(
         self,
         config: types.SimpleNamespace,
         log: logging.Logger | None = None,
         simulate: bool = False,
     ) -> None:
-        super().__init__(
-            config=config, topics=config.topics, log=log, simulation_mode=simulate
-        )
-
         self.config = config
         self.log = (
-            log.getChild(type(self).__name__)
-            if log is not None
-            else logging.getLogger(type(self).__name__)
+            log.getChild(type(self).__name__) if log is not None else logging.getLogger(type(self).__name__)
         )
 
         # We want a multiple key -> 1 value list for easy parsing
@@ -247,11 +239,7 @@ class LEDController(BaseLabJackDataClient):
         # note that were going to use the first
         # available 'ledControllerItem' in config,
         # as there should only be one anyway
-        led_topic = next(
-            topic
-            for topic in self.config.topics
-            if topic["topic_name"] == "ledControllerItem"
-        )
+        led_topic = next(topic for topic in self.config.topics if topic["topic_name"] == "ledControllerItem")
 
         # Extract the serial and lbj channel name lists
         self.led_names = led_topic["led_names"]
@@ -288,6 +276,10 @@ class LEDController(BaseLabJackDataClient):
         # cleared otherwise.
         self.status_event = asyncio.Event()
         self.status_task = utils.make_done_future()
+        self.simulation_mode = simulate
+        self.handle = None
+        if simulate:
+            self.config.identifier = ljm.constants.DEMO_MODE
 
     @classmethod
     def get_config_schema(cls) -> dict[str, Any]:
@@ -369,23 +361,13 @@ additionalProperties: false
 """
         )
 
-    async def run(self) -> None:
-        """
-        There is no use in constantly reading labjack status, so leave empty.
-        common.BaseDataClient requires that we define it:
-            TypeError: Can't instantiate abstract class
-                        LEDController with abstract method run
-        """
-        pass
+    @property
+    def connected(self) -> bool:
+        return self.handle is not None
 
-    async def read_data(self) -> None:
-        """
-        There is no use in constantly reading labjack status, so leave empty.
-        common.BaseDataClient requires that we define it:
-            TypeError: Can't instantiate abstract class
-                        LEDController with abstract method read_data
-        """
-        pass
+    async def run(self, func: Any, *args: Any, **kwargs: Any) -> Any:
+        partial = functools.partial(func, *args, **kwargs)
+        return await asyncio.to_thread(partial)
 
     def get_state(
         self,
@@ -441,7 +423,29 @@ additionalProperties: false
         else:
             raise RuntimeError("Given identifier doesn't exist")
 
-    def _blocking_adjust_dac_values(
+    async def write(self, num_frames: int, a_addresses: list, a_data_types: list, a_values: list) -> None:
+        if self.handle is None:
+            await self.connect()
+        try:
+            await self.run(ljm.eWriteAddresses, self.handle, num_frames, a_addresses, a_data_types, a_values)
+        except ljm.LJMError as ljm_error:
+            # Set up log string
+            error_code = ljm_error.errorCode
+            assert error_code is not None
+            error_string: str = str(ljm_error)
+            log_string: str = str(
+                f"Labjack reported error#{error_code} during eWriteAddress"
+                f"in switch_led, dumping values: "
+                f"ljm_error_string: {error_string}"
+            )
+
+            # If error then raise except else its a warning so continue
+            if error_code > ljm.errorcodes.WARNINGS_END or error_code != ljm.errorcodes.RECONNECT_FAILED:
+                self.log.exception(log_string)
+                raise RuntimeError(f"ljm reported error, see log: {log_string}")
+            self.log.warning(log_string)
+
+    async def adjust_dac_values(
         self,
         identifiers: List[Union[str, int]],
         values: List[Union[float, int]],
@@ -476,94 +480,16 @@ additionalProperties: false
             channels_currently_on.append(self.channels[identifier].dac_address())
             values_to_set.append(self.channels[identifier].dac_value)
 
-        # if its on, we need to adjust the DAC chan value on the labjack
-        if len(channels_currently_on) != 0:
-            if self.handle is None:
-                try:
-                    self.log.warning(
-                        "Labjack not explicitly connected when calling switch_led,"
-                        " attempting to connect now..."
-                    )
-                    self._blocking_connect()
-                except RuntimeError:
-                    raise RuntimeError("Labjack unable to connect")
+            # if its on, we need to adjust the DAC chan value on the labjack
 
-            try:
-                ljm.eWriteAddresses(
-                    self.handle,
-                    len(channels_currently_on),
-                    channels_currently_on,
-                    [ljm.constants.FLOAT32 for _ in range(len(values_to_set))],
-                    values_to_set,
-                )
-            except ljm.LJMError as ljm_error:
-                # Set up log string
-                error_code = ljm_error.errorCode
-                error_string = str(ljm_error)
-                log_string = str(
-                    f"Labjack reported error#{error_code} during eWriteAddress"
-                    f"in switch_led, dumping values: "
-                    f"identifier: {identifier} dac value: {values} "
-                    f"handle: {self.handle} address: {channels_currently_on} "
-                    f"data_type: {ljm.constants.FLOAT32} value_written: {values_to_set} "
-                    f"ljm_error_string: {error_string}"
-                )
-
-                # If error then raise except else its a warning so continue
-                if error_code > ljm.errorcodes.WARNINGS_END:
-                    self.log.exception(log_string)
-                    raise RuntimeError(f"ljm reported error, see log: {log_string}")
-                self.log.warning(log_string)
-
-    async def adjust_dac_values(
-        self,
-        identifiers: List[Union[str, int]],
-        values: List[Union[float, int]],
-    ) -> None:
-        """Adjust list of DAC channel value
-
-        Parameters
-        ----------
-        identifiers : list of `str` | `int`
-            Serial number of LED or 0-indexed identifier
-        values : list of `int` | `float`
-            0-5.0 voltage to adjust DAC channel to
-
-        Raises
-        ------
-        ValueError
-            If the dac_value given is invalid
-        Exception
-            If the command to labjack fails
-        """
-        loop = asyncio.get_running_loop()
-        try:
-            await asyncio.wait_for(
-                loop.run_in_executor(
-                    self._thread_pool,
-                    functools.partial(
-                        self._blocking_adjust_dac_values,
-                        identifiers=identifiers,
-                        values=values,
-                    ),
-                ),
-                timeout=COMMUNICATION_TIMEOUT,
+            await self.write(
+                len(channels_currently_on),
+                channels_currently_on,
+                [ljm.constants.FLOAT32 for _ in range(len(values_to_set))],
+                values_to_set,
             )
-        except asyncio.CancelledError:
-            self.log.info(
-                "run_in_thread cancelled while "
-                f"running blocking function {self._blocking_adjust_dac_values}."
-            )
-        except ValueError:
-            self.log.exception("Invalid DAC Value to set")
-            raise
-        except Exception:
-            self.log.exception(
-                f"Blocking function {self._blocking_adjust_dac_values} failed."
-            )
-            raise
 
-    def _blocking_adjust_all_dac_values(
+    async def adjust_all_dac_values(
         self,
         value: Union[float, int],
     ) -> None:
@@ -590,86 +516,13 @@ additionalProperties: false
                 values_to_set.append(value)
 
         # if its on, we need to adjust the DAC chan value on the labjack
-        if self.handle is None:
-            try:
-                self.log.warning(
-                    "Labjack not explicitly connected when calling switch_led,"
-                    " attempting to connect now..."
-                )
-                self._blocking_connect()
-            except RuntimeError:
-                raise RuntimeError("Labjack unable to connect")
 
-        try:
-            ljm.eWriteAddresses(
-                self.handle,
-                len(unique_dac_channels),
-                unique_dac_channels,
-                [ljm.constants.FLOAT32 for _ in range(len(values_to_set))],
-                values_to_set,
-            )
-        except ljm.LJMError as ljm_error:
-            # Set up log string
-            error_code = ljm_error.errorCode
-            error_string = str(ljm_error)
-            log_string = str(
-                f"Labjack reported error#{error_code} during eWriteAddress"
-                f"in switch_led, dumping values: "
-                f"dac value: {value} "
-                f"handle: {self.handle} address: {unique_dac_channels} "
-                f"data_type: {ljm.constants.FLOAT32} value_written: {values_to_set} "
-                f"ljm_error_string: {error_string}"
-            )
-
-            # If error then raise except else its a warning so continue
-            if error_code > ljm.errorcodes.WARNINGS_END:
-                self.log.exception(log_string)
-                raise RuntimeError(f"ljm reported error, see log: {log_string}")
-            self.log.warning(log_string)
-
-    async def adjust_all_dac_values(
-        self,
-        value: Union[float, int],
-    ) -> None:
-        """Adjust list of DAC channel value
-
-        Parameters
-        ----------
-        value : `int` | `float`
-            0-5.0 voltage to adjust DAC channel to
-
-        Raises
-        ------
-        ValueError
-            If the dac_value given is invalid
-        Exception
-            If the command to labjack fails
-        """
-        loop = asyncio.get_running_loop()
-        try:
-            await asyncio.wait_for(
-                loop.run_in_executor(
-                    self._thread_pool,
-                    functools.partial(
-                        self._blocking_adjust_all_dac_values,
-                        value=value,
-                    ),
-                ),
-                timeout=COMMUNICATION_TIMEOUT,
-            )
-        except asyncio.CancelledError:
-            self.log.info(
-                "run_in_thread cancelled while "
-                f"running blocking function {self._blocking_adjust_all_dac_values}."
-            )
-        except ValueError:
-            self.log.exception("Invalid DAC Value to set")
-            raise
-        except Exception:
-            self.log.exception(
-                f"Blocking function {self._blocking_adjust_dac_values} failed."
-            )
-            raise
+        await self.write(
+            len(unique_dac_channels),
+            unique_dac_channels,
+            [ljm.constants.FLOAT32 for _ in range(len(values_to_set))],
+            values_to_set,
+        )
 
     async def switch_all_leds_off(self) -> List[str]:
         """Switch ALL LEDs off"""
@@ -688,52 +541,6 @@ additionalProperties: false
         return self.led_names
 
     async def switch_multiple_leds(
-        self, identifiers: List[Union[str, int]], led_states: List[LEDBasicState]
-    ) -> None:
-        """Run a blocking function in a thread pool executor.
-
-        Only one function will run at a time, because all calls use the same
-        thread pool executor, which only has a single thread.
-
-        Parameters
-        ----------
-        identifiers : `list of str or int`
-            A list of serial numbers and/or 0-indexed identifiers
-            of the LEDs to switch
-        led_states : `list of LEDBasicState`
-            A list of boolean states for the LEDs to be switched,
-            true for on, false for off
-
-        Raises
-        ------
-        Exception
-            If the blocking switch multiple LEDs failed
-        """
-        loop = asyncio.get_running_loop()
-        try:
-            return await asyncio.wait_for(
-                loop.run_in_executor(
-                    self._thread_pool,
-                    functools.partial(
-                        self._blocking_switch_multiple_leds,
-                        identifiers=identifiers,
-                        led_states=led_states,
-                    ),
-                ),
-                timeout=COMMUNICATION_TIMEOUT,
-            )
-        except asyncio.CancelledError:
-            self.log.info(
-                "run_in_thread cancelled while running "
-                f"blocking function {self._blocking_switch_multiple_leds}."
-            )
-        except Exception:
-            self.log.exception(
-                f"Blocking function {self._blocking_switch_multiple_leds} failed."
-            )
-            raise
-
-    def _blocking_switch_multiple_leds(
         self, identifiers: List[Union[str, int]], led_states: List[LEDBasicState]
     ) -> None:
         """Switch multiple LEDs at once.
@@ -759,8 +566,7 @@ additionalProperties: false
         # confirm that the lengths of both arrays match
         if len(identifiers) != len(led_states):
             self.log.error(
-                f"Length of identifiers: {len(identifiers)}."
-                f"Length of led_states: {len(led_states)}."
+                f"Length of identifiers: {len(identifiers)}.Length of led_states: {len(led_states)}."
             )
             raise RuntimeError(
                 "Length of identifiers and states in switch_multiple_leds doesn't match. "
@@ -772,54 +578,25 @@ additionalProperties: false
             if state not in [LEDBasicState.ON, LEDBasicState.OFF]:
                 raise TypeError(f"{state} is an invalid state to set the LED to")
 
-        # connect to labjack if we currently are disconnected
-        if self.handle is None:
-            try:
-                self.log.info("Attempting to connect to Labjack...")
-                self._blocking_connect()
-            except RuntimeError:
-                raise RuntimeError("Labjack can't connect")
-
         self.log.info(f"Switching LEDs {identifiers} to {led_states}")
 
         # form list of addresses and values to write
         addresses = [self.channels[identifier].address() for identifier in identifiers]
         values = [
-            (self.channels[identifier].value(state))
-            for state, identifier in zip(led_states, identifiers)
+            (self.channels[identifier].value(state)) for state, identifier in zip(led_states, identifiers)
         ]
-        try:
-            ljm.eWriteAddresses(
-                self.handle,
-                len(identifiers),
-                addresses,
-                [ljm.constants.UINT16 for _ in led_states],
-                values,
-            )
-        except ljm.LJMError as ljm_error:
-            # Set up log string
-            error_code = ljm_error.errorCode
-            error_string = str(ljm_error)
-            log_string = str(
-                f"Labjack reported error#{error_code} during eWriteAddress"
-                f"in switch_led, dumping values: "
-                f"identifiers: {identifiers} led_states: {led_states} "
-                f"handle: {self.handle} addresses: {addresses} "
-                f"data_type: {ljm.constants.UINT16} values_written: {values} "
-                f"ljm_error_string: {error_string}"
-            )
-
-            # If error then raise except else its a warning so continue
-            if error_code > ljm.errorcodes.WARNINGS_END:
-                self.log.exception(log_string)
-                raise RuntimeError(f"ljm reported error, see log: {log_string}")
-            self.log.warning(log_string)
+        await self.write(
+            len(identifiers),
+            addresses,
+            [ljm.constants.UINT16 for _ in led_states],
+            values,
+        )
 
         # Update state
         for count, identifier in enumerate(identifiers, start=0):
             self._set_state(identifier, led_states[count])
 
-    def _blocking_connect(self) -> None:
+    async def connect(self) -> None:
         """
         Connect and then read the specified channels.
 
@@ -833,26 +610,50 @@ additionalProperties: false
             is not valid.
         """
         self.log.info("Attempting to connect to Labjack...")
-        super()._blocking_connect()
+        if self.block_handle:
+            self.log.warning("Blocking handle.")
+        for _ in range(NUMBER_OF_CONNECTION_ATTEMPTS):
+            try:
+                if not self.block_handle:
+                    self.handle = await self.run(
+                        ljm.open,
+                        deviceType=ljm.constants.dtANY,
+                        connectionType=ljm.constants.ctANY_TCP,
+                        identifier=self.config.identifier,
+                    )
+                if self.handle is not None:
+                    break
+                else:
+                    continue
+            except Exception:
+                self.log.exception("Failed to connect...Trying again.")
+        if self.handle is None:
+            raise RuntimeError(f"Failed to connect after {NUMBER_OF_CONNECTION_ATTEMPTS} times.")
 
         # Configure flexible IO to digital
         # The DIO_INHIBIT hex is what qualifies something as being digital.
         # 0 bit = digital. Read from LSB, ex: FIO0 is bit 0
         self.log.info("Setting all IO as DIO...")
-        ljm.eWriteName(self.handle, "DIO_INHIBIT", 0x00000)
-        ljm.eWriteName(self.handle, "DIO_ANALOG_ENABLE", 0x00000)
+        await self.run(ljm.eWriteName, self.handle, "DIO_INHIBIT", 0x00000)
+        await self.run(ljm.eWriteName, self.handle, "DIO_ANALOG_ENABLE", 0x00000)
 
         # Read each input channel, to make sure the configuration is valid.
         input_channel_names = set(lbc.channel for lbc in self.channels.values())
         num_frames = len(input_channel_names)
         for _ in range(3):
             try:
-                values = ljm.eReadNames(self.handle, num_frames, input_channel_names)
+                values = await self.run(ljm.eReadNames, self.handle, num_frames, input_channel_names)
                 if values:
                     break
             except Exception:
                 self.log.exception("Read failed...Trying again.")
         if len(values) != len(input_channel_names):
-            raise RuntimeError(
-                f"len(input_channel_names)={input_channel_names} != len(values)={values}"
-            )
+            raise RuntimeError(f"len(input_channel_names)={input_channel_names} != len(values)={values}")
+
+    async def disconnect(self) -> None:
+        try:
+            await self.run(ljm.close, self.handle)
+        except Exception:
+            self.log.exception("Failed to disconnect...Setting handle to None.")
+        finally:
+            self.handle = None
