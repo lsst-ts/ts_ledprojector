@@ -1,1 +1,0 @@
-Added retry loop to reading data.
