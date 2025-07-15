@@ -1,3 +1,12 @@
+ts_ledprojector v0.2.0 (2025-07-15)
+===================================
+
+Features
+--------
+
+- Added retry loop to reading data. (`OSW-562 <https://rubinobs.atlassian.net/OSW-562>`_)
+
+
 ts_ledprojector v0.1.1 (2025-06-23)
 ===================================
 
