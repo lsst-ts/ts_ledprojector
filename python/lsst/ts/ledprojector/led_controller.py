@@ -441,6 +441,30 @@ additionalProperties: false
         else:
             raise RuntimeError("Given identifier doesn't exist")
 
+    def write(self, num_frames: int, a_addresses: list, a_data_types: list, a_values: list) -> None:
+        for _ in range(3):
+            if self.handle is None:
+                self._blocking_connect()
+            try:
+                ljm.eWriteAddresses(self.handle, num_frames, a_addresses, a_data_types, a_values)
+                break
+            except ljm.LJMError as ljm_error:
+                # Set up log string
+                error_code = ljm_error.errorCode
+                assert error_code is not None
+                error_string: str = str(ljm_error)
+                log_string: str = str(
+                    f"Labjack reported error#{error_code} during eWriteAddress"
+                    f"in switch_led, dumping values: "
+                    f"ljm_error_string: {error_string}"
+                )
+
+                # If error then raise except else its a warning so continue
+                if error_code > ljm.errorcodes.WARNINGS_END or error_code != ljm.errorcodes.RECONNECT_FAILED:
+                    self.log.exception(log_string)
+                    raise RuntimeError(f"ljm reported error, see log: {log_string}")
+                self.log.warning(log_string)
+
     def _blocking_adjust_dac_values(
         self,
         identifiers: List[Union[str, int]],
@@ -488,32 +512,12 @@ additionalProperties: false
                 except RuntimeError:
                     raise RuntimeError("Labjack unable to connect")
 
-            try:
-                ljm.eWriteAddresses(
-                    self.handle,
-                    len(channels_currently_on),
-                    channels_currently_on,
-                    [ljm.constants.FLOAT32 for _ in range(len(values_to_set))],
-                    values_to_set,
-                )
-            except ljm.LJMError as ljm_error:
-                # Set up log string
-                error_code = ljm_error.errorCode
-                error_string = str(ljm_error)
-                log_string = str(
-                    f"Labjack reported error#{error_code} during eWriteAddress"
-                    f"in switch_led, dumping values: "
-                    f"identifier: {identifier} dac value: {values} "
-                    f"handle: {self.handle} address: {channels_currently_on} "
-                    f"data_type: {ljm.constants.FLOAT32} value_written: {values_to_set} "
-                    f"ljm_error_string: {error_string}"
-                )
-
-                # If error then raise except else its a warning so continue
-                if error_code > ljm.errorcodes.WARNINGS_END:
-                    self.log.exception(log_string)
-                    raise RuntimeError(f"ljm reported error, see log: {log_string}")
-                self.log.warning(log_string)
+            self.write(
+                len(channels_currently_on),
+                channels_currently_on,
+                [ljm.constants.FLOAT32 for _ in range(len(values_to_set))],
+                values_to_set,
+            )
 
     async def adjust_dac_values(
         self,
@@ -600,32 +604,12 @@ additionalProperties: false
             except RuntimeError:
                 raise RuntimeError("Labjack unable to connect")
 
-        try:
-            ljm.eWriteAddresses(
-                self.handle,
-                len(unique_dac_channels),
-                unique_dac_channels,
-                [ljm.constants.FLOAT32 for _ in range(len(values_to_set))],
-                values_to_set,
-            )
-        except ljm.LJMError as ljm_error:
-            # Set up log string
-            error_code = ljm_error.errorCode
-            error_string = str(ljm_error)
-            log_string = str(
-                f"Labjack reported error#{error_code} during eWriteAddress"
-                f"in switch_led, dumping values: "
-                f"dac value: {value} "
-                f"handle: {self.handle} address: {unique_dac_channels} "
-                f"data_type: {ljm.constants.FLOAT32} value_written: {values_to_set} "
-                f"ljm_error_string: {error_string}"
-            )
-
-            # If error then raise except else its a warning so continue
-            if error_code > ljm.errorcodes.WARNINGS_END:
-                self.log.exception(log_string)
-                raise RuntimeError(f"ljm reported error, see log: {log_string}")
-            self.log.warning(log_string)
+        self.write(
+            len(unique_dac_channels),
+            unique_dac_channels,
+            [ljm.constants.FLOAT32 for _ in range(len(values_to_set))],
+            values_to_set,
+        )
 
     async def adjust_all_dac_values(
         self,
@@ -788,32 +772,12 @@ additionalProperties: false
             (self.channels[identifier].value(state))
             for state, identifier in zip(led_states, identifiers)
         ]
-        try:
-            ljm.eWriteAddresses(
-                self.handle,
-                len(identifiers),
-                addresses,
-                [ljm.constants.UINT16 for _ in led_states],
-                values,
-            )
-        except ljm.LJMError as ljm_error:
-            # Set up log string
-            error_code = ljm_error.errorCode
-            error_string = str(ljm_error)
-            log_string = str(
-                f"Labjack reported error#{error_code} during eWriteAddress"
-                f"in switch_led, dumping values: "
-                f"identifiers: {identifiers} led_states: {led_states} "
-                f"handle: {self.handle} addresses: {addresses} "
-                f"data_type: {ljm.constants.UINT16} values_written: {values} "
-                f"ljm_error_string: {error_string}"
-            )
-
-            # If error then raise except else its a warning so continue
-            if error_code > ljm.errorcodes.WARNINGS_END:
-                self.log.exception(log_string)
-                raise RuntimeError(f"ljm reported error, see log: {log_string}")
-            self.log.warning(log_string)
+        self.write(
+            len(identifiers),
+            addresses,
+            [ljm.constants.UINT16 for _ in led_states],
+            values,
+        )
 
         # Update state
         for count, identifier in enumerate(identifiers, start=0):
