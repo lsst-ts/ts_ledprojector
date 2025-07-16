@@ -35,7 +35,7 @@ from lsst.ts.ess.labjack import BaseLabJackDataClient
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
 # Time limit for communicating with the LabJack (seconds).
-COMMUNICATION_TIMEOUT = 5
+COMMUNICATION_TIMEOUT = 15
 # Sleep time before trying to reconnect (seconds).
 RECONNECT_WAIT = 60
 
