@@ -34,9 +34,7 @@ from jsonschema.exceptions import ValidationError
 from lsst.ts import ledprojector, salobj
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
-logging.basicConfig(
-    format="%(asctime)s:%(levelname)s:%(name)s:%(message)s", level=logging.DEBUG
-)
+logging.basicConfig(format="%(asctime)s:%(levelname)s:%(name)s:%(message)s", level=logging.DEBUG)
 
 PathT: TypeAlias = str | pathlib.Path
 
@@ -55,9 +53,7 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
     @contextlib.asynccontextmanager
     async def make_topics(self) -> AsyncGenerator[types.SimpleNamespace, None]:
         salobj.set_random_lsst_dds_partition_prefix()
-        async with salobj.make_mock_write_topics(
-            name="ESS", attr_names=["ledController"]
-        ) as topics:
+        async with salobj.make_mock_write_topics(name="ESS", attr_names=["ledController"]) as topics:
             yield topics
 
     async def valid_list(self, validList: list[str], listToTest: list[str]) -> None:
@@ -98,9 +94,7 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
         )
 
         assert len(topic["dac_mapping"]) == len(topic["led_names"])
-        await self.valid_list(
-            validList=["DAC0", "DAC0", "DAC1", "DAC1"], listToTest=topic["dac_mapping"]
-        )
+        await self.valid_list(validList=["DAC0", "DAC0", "DAC1", "DAC1"], listToTest=topic["dac_mapping"])
 
     async def test_state_change(self) -> None:
         config = self.get_config("config.yaml")
@@ -157,14 +151,10 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
         for state in LEDBasicState:
             if state not in [LEDBasicState.ON, LEDBasicState.OFF]:
                 with self.assertRaises(TypeError):
-                    await asyncio.wait_for(
-                        led_client.switch_multiple_leds(["M375L4"], [state]), timeout=5
-                    )
+                    await asyncio.wait_for(led_client.switch_multiple_leds(["M375L4"], [state]), timeout=5)
 
         # accept proper values and go by multiple identifiers
-        await asyncio.wait_for(
-            led_client.switch_multiple_leds(["M375L4"], [LEDBasicState.ON]), timeout=5
-        )
+        await asyncio.wait_for(led_client.switch_multiple_leds(["M375L4"], [LEDBasicState.ON]), timeout=5)
         assert led_client.get_state("DIO1") is LEDBasicState.ON
         assert led_client.get_state("M375L4") is LEDBasicState.ON
         assert led_client.get_state(0) is LEDBasicState.ON
@@ -198,9 +188,7 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
         # test length of identifier/state mismatch
         with self.assertRaises(RuntimeError):
             await asyncio.wait_for(
-                led_client.switch_multiple_leds(
-                    ["M375L4", "EIO3"], [LEDBasicState.ON for i in range(3)]
-                ),
+                led_client.switch_multiple_leds(["M375L4", "EIO3"], [LEDBasicState.ON for i in range(3)]),
                 timeout=5,
             )
 
@@ -209,9 +197,7 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
             if state not in [LEDBasicState.ON, LEDBasicState.OFF]:
                 with self.assertRaises(TypeError):
                     await asyncio.wait_for(
-                        led_client.switch_multiple_leds(
-                            ["M375L4", "EIO3"], [state for i in range(2)]
-                        ),
+                        led_client.switch_multiple_leds(["M375L4", "EIO3"], [state for i in range(2)]),
                         timeout=5,
                     )
 
@@ -330,9 +316,7 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
 
         for chan in bad_channels:
             with self.assertRaises(TypeError):
-                ledprojector.led_controller.LabjackChannel(
-                    serial_number="ASDF", channel=chan
-                )
+                ledprojector.led_controller.LabjackChannel(serial_number="ASDF", channel=chan)
 
     def get_config(self, filename: PathT) -> types.SimpleNamespace:
         """Get a config dict from tests/data.
