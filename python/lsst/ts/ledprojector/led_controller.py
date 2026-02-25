@@ -24,12 +24,14 @@ import asyncio
 import functools
 import logging
 import types
+from socket import gethostbyname
 from typing import Any, Dict, List, Union
 
 import yaml
 
 # Hide mypy error `Module "labjack" has no attribute "ljm"`.
 from labjack import ljm  # type: ignore
+
 from lsst.ts import utils
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
@@ -610,6 +612,13 @@ additionalProperties: false
             is not valid.
         """
         self.log.info("Attempting to connect to Labjack...")
+        match self.simulation_mode:
+            case 0:
+                identifier = gethostbyname(self.config.identifier)
+            case 1:
+                identifier = self.config.identifier
+            case _:
+                identifier = self.config.identifier
         if self.block_handle:
             self.log.warning("Blocking handle.")
         for _ in range(NUMBER_OF_CONNECTION_ATTEMPTS):
@@ -619,7 +628,7 @@ additionalProperties: false
                         ljm.open,
                         deviceType=ljm.constants.dtANY,
                         connectionType=ljm.constants.ctANY_TCP,
-                        identifier=self.config.identifier,
+                        identifier=identifier,
                     )
                 if self.handle is not None:
                     break

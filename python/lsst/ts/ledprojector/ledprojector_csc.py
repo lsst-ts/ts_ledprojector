@@ -25,8 +25,7 @@ import asyncio
 import types
 from typing import Any, List, Union
 
-from lsst.ts import salobj
-from lsst.ts import utils
+from lsst.ts import salobj, utils
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
 from . import __version__

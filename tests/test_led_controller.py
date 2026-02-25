@@ -31,6 +31,7 @@ from typing import TypeAlias
 
 import yaml
 from jsonschema.exceptions import ValidationError
+
 from lsst.ts import ledprojector, salobj
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
