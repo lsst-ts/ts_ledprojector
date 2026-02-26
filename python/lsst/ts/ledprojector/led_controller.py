@@ -615,8 +615,7 @@ additionalProperties: false
         match self.simulation_mode:
             case 0:
                 identifier = gethostbyname(self.config.identifier)
-            case 1:
-                identifier = self.config.identifier
+            # All other cases should use simulation behavior.
             case _:
                 identifier = self.config.identifier
         if self.block_handle:
