@@ -25,8 +25,7 @@ import asyncio
 import types
 from typing import Any, List, Union
 
-from lsst.ts import salobj
-from lsst.ts import utils
+from lsst.ts import salobj, utils
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
 from . import __version__
@@ -106,6 +105,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
             assert self.led_controller is not None
             if not self.led_controller.connected and self.should_be_connected:
                 await self.fault(code=2, report="Lost connection.")
+                return
             await asyncio.sleep(self.heartbeat_interval)
 
     async def handle_summary_state(self) -> None:
@@ -125,7 +125,11 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
                 self.led_controller = LEDController(
                     config=self.config, log=self.log, simulate=self.simulation_mode
                 )
-                await self.connect_led()
+                try:
+                    await self.connect_led()
+                except Exception:
+                    await self.fault(code=1, report="Failed to connect.")
+                    return
             if self.monitor_loop_task.done():
                 self.monitor_loop_task = asyncio.ensure_future(self.monitor_loop())
         else:

@@ -23,11 +23,11 @@ import pathlib
 import unittest
 from typing import Any
 
-from lsst.ts import ledprojector
-from lsst.ts import salobj
+import pytest
+
+from lsst.ts import ledprojector, salobj
 from lsst.ts.ledprojector import LEDProjectorCsc
 from lsst.ts.xml.enums.LEDProjector import LEDBasicState
-import pytest
 
 TEST_CONFIG_DIR = pathlib.Path(__file__).parents[1].joinpath("tests", "data", "config")
 SHORT_TIMEOUT = 5
