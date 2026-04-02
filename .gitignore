@@ -39,3 +39,5 @@ towncrier.toml
 .isort.cfg
 .mypy.ini
 .ruff.toml
+
+doc/api

@@ -101,7 +101,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
         self.config = config
 
     async def monitor_loop(self) -> None:
-        while self.controller_connected:
+        while self.led_controller is not None:
             assert self.led_controller is not None
             if not self.led_controller.connected and self.should_be_connected:
                 await self.fault(code=2, report="Lost connection.")
