@@ -21,9 +21,8 @@
 
 import pathlib
 import unittest
-from typing import Any
-
-import pytest
+from typing import Any, Callable
+from unittest import mock
 
 from lsst.ts import ledprojector, salobj
 from lsst.ts.ledprojector import LEDProjectorCsc
@@ -76,15 +75,16 @@ class CscTestCase(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
     async def test_bin_script(self) -> None:
         await self.check_bin_script(name="LEDProjector", index=0, exe_name="run_ledprojector")
 
-    @pytest.mark.skip("Doesn't work.")
     async def test_fault(self) -> None:
         async with self.make_csc(
             initial_state=salobj.State.ENABLED, config_dir=TEST_CONFIG_DIR, simulation_mode=1
         ):
+            await self.assert_next_summary_state(salobj.State.ENABLED, timeout=SHORT_TIMEOUT)
+            await self.assert_next_sample(self.remote.evt_errorCode, errorCode=0)
+            assert self.csc.led_controller is not None
             self.csc.led_controller.handle = None
-            self.csc.led_controller.block_handle = True
-            await self.assert_next_summary_state(salobj.State.ENABLED)
-            await self.assert_next_summary_state(salobj.State.FAULT, timeout=120)
+            await self.assert_next_summary_state(salobj.State.FAULT, timeout=SHORT_TIMEOUT)
+            await self.assert_next_sample(self.remote.evt_errorCode, errorCode=2)
 
     async def test_switch_leds(self) -> None:
         async with self.make_csc(
@@ -132,3 +132,94 @@ class CscTestCase(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
                 assert value == 0
             except AttributeError:
                 pass
+
+    async def test_enable_retries_controller_connection(self) -> None:
+        open_attempts = 0
+
+        class FakeLJMError(Exception):
+            def __init__(self, error_code: int, error_string: str) -> None:
+                super().__init__(error_string)
+                self.errorCode = error_code
+                self.errorString = error_string
+
+        async def run_side_effect(func: Callable, *args: Any, **kwargs: Any) -> None | str | list[int]:
+            nonlocal open_attempts
+
+            if func is ledprojector.led_controller.ljm.open:
+                open_attempts += 1
+                if open_attempts < 3:
+                    raise FakeLJMError(1234, "temporary open failure")
+                return "connected-handle"
+
+            if func is ledprojector.led_controller.ljm.eReadNames:
+                return [0] * args[1]
+
+            return None
+
+        with (
+            mock.patch.object(ledprojector.led_controller, "COMMUNICATION_TIMEOUT", 0),
+            mock.patch.object(ledprojector.ledprojector_csc, "COMMUNICATION_TIMEOUT", SHORT_TIMEOUT),
+            mock.patch.object(ledprojector.led_controller.ljm, "LJMError", FakeLJMError),
+            mock.patch.object(
+                ledprojector.led_controller.LEDController,
+                "run",
+                new=mock.AsyncMock(side_effect=run_side_effect),
+            ) as run_mock,
+        ):
+            async with self.make_csc(
+                initial_state=salobj.State.ENABLED,
+                config_dir=TEST_CONFIG_DIR,
+                simulation_mode=1,
+            ):
+                assert self.csc.summary_state == salobj.State.ENABLED
+                assert self.csc.led_controller is not None
+                assert self.csc.led_controller.handle == "connected-handle"
+
+        assert open_attempts == 3
+        open_calls = [
+            call
+            for call in run_mock.await_args_list
+            if call.args and call.args[0] is ledprojector.led_controller.ljm.open
+        ]
+        assert len(open_calls) == 3
+
+    async def test_switch_on_reconnects_controller(self) -> None:
+        async with self.make_csc(
+            initial_state=salobj.State.ENABLED,
+            config_dir=TEST_CONFIG_DIR,
+            simulation_mode=1,
+        ):
+            assert self.csc.led_controller is not None
+            self.csc.heartbeat_interval = 60
+            self.csc.led_controller.handle = None
+
+            async def connect_side_effect() -> None:
+                assert self.csc.led_controller is not None
+                self.csc.led_controller.handle = "reconnected-handle"
+
+            self.csc.led_controller.connect = mock.AsyncMock(side_effect=connect_side_effect)
+            self.csc.led_controller.run = mock.AsyncMock(return_value=None)
+
+            try:
+                self.remote.cmd_switchOn.set(serialNumbers="M375L4")
+            except AttributeError:
+                self.remote.cmd_switchOn.set(serialNumber="M375L4")
+
+            await self.remote.cmd_switchOn.start(timeout=SHORT_TIMEOUT)
+
+            self.csc.led_controller.connect.assert_awaited_once()
+            self.csc.led_controller.run.assert_awaited_once_with(
+                ledprojector.led_controller.ljm.eWriteAddresses,
+                "reconnected-handle",
+                1,
+                [self.csc.led_controller.channels["M375L4"].address()],
+                [ledprojector.led_controller.ljm.constants.UINT16],
+                [False],
+            )
+
+            led_state = await self.assert_next_sample(
+                topic=self.remote.evt_ledState,
+                serialNumber="M375L4",
+                ledBasicState=LEDBasicState.ON,
+            )
+            assert led_state.serialNumber == "M375L4"

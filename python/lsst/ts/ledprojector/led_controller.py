@@ -37,9 +37,8 @@ from lsst.ts.xml.enums.LEDProjector import LEDBasicState
 
 # Time limit for communicating with the LabJack (seconds).
 COMMUNICATION_TIMEOUT = 15
-# Sleep time before trying to reconnect (seconds).
-RECONNECT_WAIT = 60
 NUMBER_OF_CONNECTION_ATTEMPTS = 3
+OFF = 0x00000
 
 
 class LabjackChannel:
@@ -633,8 +632,12 @@ additionalProperties: false
                     break
                 else:
                     continue
-            except Exception:
-                self.log.exception("Failed to connect...Trying again.")
+            except ljm.LJMError as lje:
+                self.log.exception(
+                    f"Failed to connect... The error code is {lje.errorCode} which is {lje.errorString}."
+                )
+                self.log.info(f"Trying again... Waiting for {COMMUNICATION_TIMEOUT} second(s).")
+                await asyncio.sleep(COMMUNICATION_TIMEOUT)
         if self.handle is None:
             raise RuntimeError(f"Failed to connect after {NUMBER_OF_CONNECTION_ATTEMPTS} times.")
 
@@ -642,8 +645,8 @@ additionalProperties: false
         # The DIO_INHIBIT hex is what qualifies something as being digital.
         # 0 bit = digital. Read from LSB, ex: FIO0 is bit 0
         self.log.info("Setting all IO as DIO...")
-        await self.run(ljm.eWriteName, self.handle, "DIO_INHIBIT", 0x00000)
-        await self.run(ljm.eWriteName, self.handle, "DIO_ANALOG_ENABLE", 0x00000)
+        await self.run(ljm.eWriteName, self.handle, "DIO_INHIBIT", OFF)
+        await self.run(ljm.eWriteName, self.handle, "DIO_ANALOG_ENABLE", OFF)
 
         # Read each input channel, to make sure the configuration is valid.
         input_channel_names = set(lbc.channel for lbc in self.channels.values())
@@ -653,8 +656,11 @@ additionalProperties: false
                 values = await self.run(ljm.eReadNames, self.handle, num_frames, input_channel_names)
                 if values:
                     break
-            except Exception:
-                self.log.exception("Read failed...Trying again.")
+            except ljm.LJMError:
+                self.log.exception(
+                    f"Read failed...Trying again. Waiting for {COMMUNICATION_TIMEOUT} second(s)."
+                )
+                await asyncio.sleep(COMMUNICATION_TIMEOUT)
         if len(values) != len(input_channel_names):
             raise RuntimeError(f"len(input_channel_names)={input_channel_names} != len(values)={values}")
 

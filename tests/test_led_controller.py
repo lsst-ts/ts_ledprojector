@@ -27,7 +27,8 @@ import random
 import types
 import unittest
 from collections.abc import AsyncGenerator
-from typing import TypeAlias
+from typing import Any, Callable, TypeAlias
+from unittest import mock
 
 import yaml
 from jsonschema.exceptions import ValidationError
@@ -135,6 +136,88 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
         # test connection and disconnection
         await led_client.connect()
         await led_client.disconnect()
+
+    async def test_write_reconnects_when_handle_is_missing(self) -> None:
+        config = self.get_config("config.yaml")
+        led_client = ledprojector.LEDController(
+            config=config,
+            log=self.log,
+            simulate=True,
+        )
+
+        async def connect_side_effect() -> None:
+            led_client.handle = "reconnected-handle"
+
+        led_client.connect = mock.AsyncMock(side_effect=connect_side_effect)
+        led_client.run = mock.AsyncMock(return_value=None)
+
+        await led_client.write(
+            1,
+            [led_client.channels["M375L4"].address()],
+            [ledprojector.led_controller.ljm.constants.UINT16],
+            [True],
+        )
+
+        led_client.connect.assert_awaited_once()
+        led_client.run.assert_awaited_once_with(
+            ledprojector.led_controller.ljm.eWriteAddresses,
+            "reconnected-handle",
+            1,
+            [led_client.channels["M375L4"].address()],
+            [ledprojector.led_controller.ljm.constants.UINT16],
+            [True],
+        )
+
+    async def test_connect_retries_after_open_failures(self) -> None:
+        config = self.get_config("config.yaml")
+        led_client = ledprojector.LEDController(
+            config=config,
+            log=self.log,
+            simulate=True,
+        )
+
+        class FakeLJMError(Exception):
+            def __init__(self, error_code: int, error_string: str) -> None:
+                super().__init__(error_string)
+                self.errorCode = error_code
+                self.errorString = error_string
+
+        open_attempts = 0
+
+        async def run_side_effect(func: Callable, *args: Any, **kwargs: Any) -> None | str | list[int]:
+            nonlocal open_attempts
+
+            if func is ledprojector.led_controller.ljm.open:
+                open_attempts += 1
+                if open_attempts < 3:
+                    raise FakeLJMError(1234, "temporary open failure")
+                return "connected-handle"
+
+            if func is ledprojector.led_controller.ljm.eReadNames:
+                return [0] * args[1]
+
+            return None
+
+        with (
+            mock.patch.object(ledprojector.led_controller.ljm, "LJMError", FakeLJMError),
+            mock.patch.object(
+                ledprojector.led_controller.asyncio, "sleep", new=mock.AsyncMock()
+            ) as sleep_mock,
+        ):
+            led_client.run = mock.AsyncMock(side_effect=run_side_effect)
+            await led_client.connect()
+
+        assert led_client.handle == "connected-handle"
+        assert open_attempts == 3
+        assert sleep_mock.await_count == 2
+        sleep_mock.assert_any_await(ledprojector.led_controller.COMMUNICATION_TIMEOUT)
+
+        open_calls = [
+            call
+            for call in led_client.run.await_args_list
+            if call.args and call.args[0] is ledprojector.led_controller.ljm.open
+        ]
+        assert len(open_calls) == 3
 
     async def test_led_switching(self) -> None:
         config = self.get_config("config.yaml")

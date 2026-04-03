@@ -1,0 +1,17 @@
+[project]
+title = "LEDProjector"
+copyright = "2023-2026 Association of Universities for Research in Astronomy, Inc. (AURA)"
+
+[project.python]
+package = "ts_ledprojector"
+documentation_url_key = "documentation"
+github_url_key = "repository"
+
+[sphinx]
+extensions = ["sphinx-jsonschema"]
+
+[sphinx.intersphinx.projects]
+ts-xml = "https://ts-xml.lsst.io"
+pymodbus = "https://pymodbus.readthedocs.io/en/v3.8.0/"
+salobj = "https://ts-salobj.lsst.io"
+python = "https://docs.python.org/3.10/"
