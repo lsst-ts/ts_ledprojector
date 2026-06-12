@@ -207,6 +207,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
                 ledBasicState=self.led_controller.channels[sn].status,
                 value=self.led_controller.channels[sn].dac_value,
             )
+        await self.update_leds_on()
 
     async def do_switchAllOn(self, data: types.SimpleNamespace) -> None:
         """Switch on all LEDs.
@@ -231,6 +232,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
                 ledBasicState=self.led_controller.channels[sn].status,
                 value=self.led_controller.channels[sn].dac_value,
             )
+        await self.update_leds_on()
 
     async def switch_leds(self, identifiers: List[Union[str, int]], on_off: LEDBasicState) -> None:
         """Switch multiple LEDs at once.
@@ -287,6 +289,7 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
                 ledBasicState=self.led_controller.channels[sn].status,
                 value=self.led_controller.channels[sn].dac_value,
             )
+        await self.update_leds_on()
 
     async def do_adjustAllDACPower(self, data: types.SimpleNamespace) -> None:
         """Adjust voltage on all DAC Channels.
@@ -320,6 +323,8 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
                 ledBasicState=channel.status,
                 value=channel.dac_value,
             )
+
+        await self.update_leds_on()
 
     async def do_switchOn(self, data: types.SimpleNamespace) -> None:
         """Switch on one or more LEDs.
@@ -355,6 +360,8 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
             )
             await self.evt_ledState.write()
 
+        await self.update_leds_on()
+
     async def do_switchOff(self, data: types.SimpleNamespace) -> None:
         """Switch off one or more specific led.
 
@@ -379,6 +386,19 @@ class LEDProjectorCsc(salobj.ConfigurableCsc):
                 ledBasicState=self.led_controller.channels[sn].status,
             )
             await self.evt_ledState.write()
+
+        await self.update_leds_on()
+
+    async def update_leds_on(self) -> None:
+        """Calculate and publish the ledsOn event if it exists."""
+        if self.led_controller is None:
+            raise RuntimeError("Labjack is not connected.")
+        channels, values = self.led_controller.get_led_channels_on()
+        # TODO OSW-2435 Remove once compatible XML is released.
+        if hasattr(self, "evt_ledsOn"):
+            await self.evt_ledsOn.set_write(serialNumbers=channels, dacValues=values)
+        else:
+            self.log.warning("Cannot publish evt_ledsOn with current XML.")
 
 
 def run_ledprojector() -> None:

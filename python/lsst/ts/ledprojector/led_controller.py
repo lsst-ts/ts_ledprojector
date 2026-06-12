@@ -370,6 +370,26 @@ additionalProperties: false
         partial = functools.partial(func, *args, **kwargs)
         return await asyncio.to_thread(partial)
 
+    def get_led_channels_on(self) -> tuple[str, str]:
+        """Return LEDs that are on and their DAC values.
+
+        Returns
+        -------
+        serial_numbers : `str`
+            Comma-delimited serial numbers for LEDs whose cached state is ON.
+        values : `str`
+            Comma-delimited cached DAC values for the same LEDs. The order
+            matches ``serial_numbers`` and the configured LED order.
+        """
+        channels_on = [
+            channel
+            for led_name in self.led_names
+            if (channel := self.channels[led_name]).status is LEDBasicState.ON
+        ]
+        return ",".join(channel.serial for channel in channels_on), ",".join(
+            str(channel.dac_value) for channel in channels_on
+        )
+
     def get_state(
         self,
         identifier: str | int,
