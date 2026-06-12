@@ -43,6 +43,11 @@ class CscTestCase(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             simulation_mode=simulation_mode,
         )
 
+    # TODO OSW-2435 Remove once compatible XML is released.
+    def require_leds_on_event(self) -> None:
+        if not hasattr(self.remote, "evt_ledsOn"):
+            self.skipTest("evt_ledsOn is not available in this XML version.")
+
     async def test_standard_state_transitions(self) -> None:
         async with self.make_csc(
             initial_state=salobj.State.STANDBY,
@@ -132,6 +137,113 @@ class CscTestCase(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
                 assert value == 0
             except AttributeError:
                 pass
+
+    async def test_switch_on_publishes_leds_on_event(self) -> None:
+        async with self.make_csc(
+            initial_state=salobj.State.ENABLED,
+            config_dir=TEST_CONFIG_DIR,
+            simulation_mode=1,
+        ):
+            self.require_leds_on_event()
+            assert self.csc.led_controller is not None
+            self.csc.led_controller.channels["M375L4"].dac_value = 1.5
+
+            # TODO DM-44713 Remove when XML v21 is released.
+            try:
+                self.remote.cmd_switchOn.set(serialNumbers="M375L4")
+            except AttributeError:
+                self.remote.cmd_switchOn.set(serialNumber="M375L4")
+
+            await self.remote.cmd_switchOn.start(timeout=SHORT_TIMEOUT)
+
+            leds_on = await self.assert_next_sample(
+                topic=self.remote.evt_ledsOn,
+            )
+            assert leds_on.serialNumbers == "M375L4"
+            assert leds_on.dacValues == "1.5"
+
+    async def test_switch_on_publishes_all_leds_on_event_values(self) -> None:
+        async with self.make_csc(
+            initial_state=salobj.State.ENABLED,
+            config_dir=TEST_CONFIG_DIR,
+            simulation_mode=1,
+        ):
+            self.require_leds_on_event()
+            assert self.csc.led_controller is not None
+            self.csc.led_controller.channels["M375L4"].dac_value = 1.5
+            self.csc.led_controller.channels["M505L4"].dac_value = 2.75
+            self.csc.led_controller.channels["M565L4"].dac_value = 4.0
+
+            self.csc.led_controller._set_state("M565L4", LEDBasicState.OFF)
+
+            # TODO DM-44713 Remove when XML v21 is released.
+            try:
+                self.remote.cmd_switchOn.set(serialNumbers="M375L4,M505L4")
+            except AttributeError:
+                self.remote.cmd_switchOn.set(serialNumber="M375L4,M505L4")
+
+            await self.remote.cmd_switchOn.start(timeout=SHORT_TIMEOUT)
+
+            leds_on = await self.assert_next_sample(
+                topic=self.remote.evt_ledsOn,
+            )
+            assert leds_on.serialNumbers == "M375L4,M505L4"
+            assert leds_on.dacValues == "1.5,2.75"
+
+    async def test_switch_off_publishes_leds_on_event(self) -> None:
+        async with self.make_csc(
+            initial_state=salobj.State.ENABLED,
+            config_dir=TEST_CONFIG_DIR,
+            simulation_mode=1,
+        ):
+            self.require_leds_on_event()
+            assert self.csc.led_controller is not None
+            self.csc.led_controller.channels["M375L4"].dac_value = 1.5
+            self.csc.led_controller.channels["M505L4"].dac_value = 2.75
+            self.csc.led_controller._set_state("M375L4", LEDBasicState.ON)
+            self.csc.led_controller._set_state("M505L4", LEDBasicState.ON)
+            update_leds_on_mock = mock.AsyncMock(wraps=self.csc.update_leds_on)
+            self.csc.update_leds_on = update_leds_on_mock
+
+            # TODO DM-44713 Remove when XML v21 is released.
+            try:
+                self.remote.cmd_switchOff.set(serialNumbers="M375L4")
+            except AttributeError:
+                self.remote.cmd_switchOff.set(serialNumber="M375L4")
+
+            await self.remote.cmd_switchOff.start(timeout=SHORT_TIMEOUT)
+
+            leds_on = await self.assert_next_sample(
+                topic=self.remote.evt_ledsOn,
+            )
+            update_leds_on_mock.assert_awaited_once()
+            assert leds_on.serialNumbers == "M505L4"
+            assert leds_on.dacValues == "2.75"
+
+    async def test_adjust_all_dac_power_publishes_leds_on_event(self) -> None:
+        async with self.make_csc(
+            initial_state=salobj.State.ENABLED,
+            config_dir=TEST_CONFIG_DIR,
+            simulation_mode=1,
+        ):
+            self.require_leds_on_event()
+            assert self.csc.led_controller is not None
+            self.csc.led_controller._set_state("M375L4", LEDBasicState.ON)
+            self.csc.led_controller._set_state("M505L4", LEDBasicState.ON)
+            self.csc.led_controller._set_state("M565L4", LEDBasicState.OFF)
+            update_leds_on_mock = mock.AsyncMock(wraps=self.csc.update_leds_on)
+            self.csc.update_leds_on = update_leds_on_mock
+
+            self.remote.cmd_adjustAllDACPower.set(dacValue=3.25)
+
+            await self.remote.cmd_adjustAllDACPower.start(timeout=SHORT_TIMEOUT)
+
+            leds_on = await self.assert_next_sample(
+                topic=self.remote.evt_ledsOn,
+            )
+            update_leds_on_mock.assert_awaited_once()
+            assert leds_on.serialNumbers == "M375L4,M505L4"
+            assert leds_on.dacValues == "3.25,3.25"
 
     async def test_enable_retries_controller_connection(self) -> None:
         open_attempts = 0

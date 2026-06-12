@@ -125,6 +125,25 @@ class DataClientTestCase(unittest.IsolatedAsyncioTestCase):
         led_client._set_state("M375L4", LEDBasicState.OFF)
         assert led_client.get_state("DIO1") is LEDBasicState.OFF
 
+    async def test_get_led_channels_on(self) -> None:
+        config = self.get_config("config.yaml")
+        led_client = ledprojector.LEDController(
+            config=config,
+            log=self.log,
+            simulate=True,
+        )
+
+        assert led_client.get_led_channels_on() == ("", "")
+
+        led_client._set_state("M375L4", LEDBasicState.ON)
+        led_client.channels["M375L4"].dac_value = 1.5
+        led_client._set_state("CIO3", LEDBasicState.ON)
+        led_client.channels["CIO3"].dac_value = 2.75
+        led_client._set_state("M565L4", LEDBasicState.OFF)
+        led_client.channels["M565L4"].dac_value = 4.0
+
+        assert led_client.get_led_channels_on() == ("M375L4,M505L4", "1.5,2.75")
+
     async def test_connecting(self) -> None:
         config = self.get_config("config.yaml")
         led_client = ledprojector.LEDController(

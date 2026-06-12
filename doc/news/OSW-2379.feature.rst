@@ -1,0 +1,1 @@
+Added publishing of the ``ledsOn`` event with comma-delimited LED serial numbers and DAC values for LEDs that are currently on.
