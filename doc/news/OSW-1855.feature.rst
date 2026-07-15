@@ -1,1 +1,0 @@
-Added functionality to look up IP address by host name before creating Labjack connection.
