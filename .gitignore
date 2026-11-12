@@ -41,3 +41,4 @@ towncrier.toml
 .ruff.toml
 
 doc/api
+.LICENSE.txt
