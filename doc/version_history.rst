@@ -1,3 +1,12 @@
+v0.3.1 (2026-11-17)
+===================
+
+Bug Fixes
+---------
+
+- Swapped on commands to be high output and off commands to be low output. (`SSW-3185 <https://rubinobs.atlassian.net//browse/SSW-3185>`_)
+
+
 v0.3.0 (2026-07-15)
 ===================
 
