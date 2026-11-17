@@ -14,7 +14,6 @@ ospl-info.log
 
 # Built by sconsUtils
 version.py
-bin/
 
 # Pytest
 tests/.tests
@@ -41,3 +40,4 @@ towncrier.toml
 .ruff.toml
 
 doc/api
+.LICENSE.txt
