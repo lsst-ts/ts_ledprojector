@@ -202,7 +202,7 @@ class LabjackChannel:
         if self.channel[:3] == "DAC":
             return state_to_write
         else:
-            return False if state_to_write == LEDBasicState.ON else True
+            return True if state_to_write == LEDBasicState.ON else False
 
 
 class LEDController:

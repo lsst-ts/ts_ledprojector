@@ -326,7 +326,7 @@ class CscTestCase(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
                 1,
                 [self.csc.led_controller.channels["M375L4"].address()],
                 [ledprojector.led_controller.ljm.constants.UINT16],
-                [False],
+                [True],
             )
 
             led_state = await self.assert_next_sample(
